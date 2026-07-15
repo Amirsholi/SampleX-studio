@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "vite --host 127.0.0.1",
     "build": "tsc --noEmit && vite build",
+    "release:zip": "npm run build && powershell -NoProfile -ExecutionPolicy Bypass -File scripts/package-extension.ps1",
     "preview": "vite preview --host 127.0.0.1",
     "license:promo": "node scripts/generate-license.mjs promo",
     "license:permanent": "node scripts/generate-license.mjs permanent",
