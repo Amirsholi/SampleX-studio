@@ -1,5 +1,5 @@
 ﻿export const FREE_EXPORTS = 75;
-export const LICENSE_URL = "https://portfolio-i9t5r1e36-amirs-projects-ceb3ce3f.vercel.app/#samplex";
+export const LICENSE_URL = "https://portfolio-plum-delta-48.vercel.app/#samplex";
 
 const CREDIT_KEY = "samplexExportCredits";
 const LICENSE_KEY = "samplexLicense";
