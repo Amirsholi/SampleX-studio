@@ -1,0 +1,32 @@
+{
+  "manifest_version": 3,
+  "name": "SampleX — Tab Audio Sampler",
+  "short_name": "SampleX",
+  "version": "0.3.0",
+  "description": "Record the active tab, trim the sample, analyze BPM, key and frequency, then export WAV.",
+  "minimum_chrome_version": "116",
+  "permissions": ["activeTab", "offscreen", "scripting", "storage", "tabCapture"],
+  "action": {
+    "default_title": "Open or close SampleX",
+    "default_icon": {
+      "16": "icons/samplex-16.png",
+      "32": "icons/samplex-32.png",
+      "48": "icons/samplex-48.png",
+      "128": "icons/samplex-128.png"
+    }
+  },
+  "icons": {
+    "16": "icons/samplex-16.png",
+    "32": "icons/samplex-32.png",
+    "48": "icons/samplex-48.png",
+    "128": "icons/samplex-128.png"
+  },
+  "background": {
+    "service_worker": "assets/background.js",
+    "type": "module"
+  },
+  "web_accessible_resources": [{
+    "resources": ["popup.html", "assets/*"],
+    "matches": ["http://*/*", "https://*/*"]
+  }]
+}

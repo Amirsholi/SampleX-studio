@@ -1,0 +1,75 @@
+:root {
+  --panel: #11161c;
+  --display: #0e151c;
+  --accent-bpm: #9dde70;
+  --accent-key: #b9a1f7;
+  --accent-hz: #6fa8f5;
+  --accent-time: #7edbe8;
+  --accent-record: #ff626a;
+  --accent-trim: #ffad5c;
+  --accent-playhead: #ffd08a;
+  color: #e8edf2;
+  background: #0c1015;
+  font-family: "Segoe UI Variable", "Inter", system-ui, sans-serif;
+  font-synthesis: none;
+}
+* { box-sizing: border-box; }
+html, body, #root { width: 600px; height: 320px; margin: 0; overflow: hidden; }
+button, input { font: inherit; }
+button { color: inherit; }
+.samplex { width: 600px; height: 320px; display: grid; grid-template-rows: 28px 262px 30px; background: var(--panel); color: #e8edf2; border: 1px solid #252b33; box-shadow: inset 0 1px 0 rgba(130,151,169,.12), inset 0 -1px 0 #080a0d; }
+.sample-header { display: flex; align-items: center; padding: 0 15px; background: var(--panel); }
+.brand { color: #eef5f8; font-family: Bahnschrift,"Segoe UI Variable",sans-serif; font-size: 10px; letter-spacing: .2em; font-weight: 600; }
+.name-field { min-width:0; flex:1; height:23px; display:flex; align-items:center; gap:7px; padding:0 7px; color:#53616c; border:1px solid rgba(107,139,158,.1); border-radius:3px; background:rgba(7,12,16,.2); }
+.name-field.editable { color:#90a3af; border-color:rgba(122,153,169,.28); background:rgba(7,12,16,.44); box-shadow:inset 0 1px 0 rgba(183,217,233,.04); }
+.name-field.editable:focus-within { color:#f1bd7d; border-color:rgba(237,168,91,.42); }
+.name-field input { width:100%; min-width:0; border:0; outline:0; padding:0; color:#86949f; background:transparent; font-size:10px; text-align:left; text-overflow:ellipsis; }
+.name-field input:focus { color:#edf3f7; }
+.name-field input:disabled { opacity:.55; -webkit-text-fill-color:#66747e; }
+.instrument-stage { display:grid; grid-template-columns:68px minmax(0,1fr); align-items:stretch; padding:2px 8px 0; }
+.side-control { display: grid; place-items: center; }
+.rec-side { align-content:center; }
+.rec-action,.delete-action,.play-action,.wav-action { border: 0; background: transparent; cursor: pointer; }
+.rec-action { display: grid; justify-items: center; gap: 6px; padding: 0; color: #a4b0ba; font-size: 9px; font-weight: 700; letter-spacing: .14em; }
+.control-face { width: 52px; height: 52px; display: grid; place-items: center; color: #c2cbd2; background: #171e25; border: 1px solid #303c46; border-radius: 50%; box-shadow: inset 0 1px 1px rgba(213,231,241,.2), inset 0 -5px 8px rgba(0,0,0,.6), 0 3px 8px rgba(0,0,0,.32); transition: color .2s ease,border-color .2s ease,box-shadow .2s ease; }
+.rec-action.active { color: var(--accent-record); }
+.rec-action.active .control-face { color: var(--accent-record); border-color: rgba(255,98,106,.42); box-shadow: inset 0 1px 1px rgba(255,201,201,.18), inset 0 -5px 8px #160b0d, 0 0 12px rgba(255,75,82,.3); animation: record-pulse 1.9s ease-in-out infinite; }
+.audio-core { min-width:0; display:grid; grid-template-rows:26px 164px 38px 32px; align-content:start; }
+.file-row { display:flex; align-items:center; gap:9px; padding:0 2px 3px 0; }
+.display-frame { position: relative; padding: 0; background: transparent; border: 0; box-shadow: none; }
+.wave-section { position:relative; height:164px; overflow:hidden; background-color:#070b0f; border-radius:2px; box-shadow:inset 0 1px 0 rgba(174,194,205,.07),inset 0 -8px 18px rgba(0,0,0,.2),inset 0 0 22px rgba(110,137,150,.025); }
+.flat-wave { position: absolute; left: 14px; right: 14px; top: 50%; height: 1px; background: #31536a; box-shadow: 0 0 6px rgba(73,181,224,.12); }
+.live-wave,.wave-ready { position:absolute; inset:12px 3px; width:calc(100% - 6px); height:140px; filter:drop-shadow(0 0 2px rgba(188,218,222,.1)); }
+.wave-ready:not(.hidden) { animation: waveform-arrive .24s ease-out; }
+.wave-ready.hidden { visibility: hidden; }
+.wave-section ::part(region) { border-radius:1px; box-shadow:inset 0 0 12px rgba(255,173,92,.035); }
+.wave-section ::part(region-handle) { width:18px !important; height:82% !important; top:9% !important; background-color:transparent !important; border:0 !important; border-radius:0 !important; filter:drop-shadow(0 0 4px rgba(255,173,92,.28)); cursor:ew-resize !important; }
+.wave-section ::part(region-handle-left) { left:0 !important; background-image:linear-gradient(90deg,var(--accent-trim) 0 9px,transparent 9px),linear-gradient(90deg,var(--accent-trim) 0 9px,transparent 9px),linear-gradient(90deg,var(--accent-trim) 0 2px,transparent 2px) !important; background-size:100% 2px,100% 2px,100% 100% !important; background-position:0 0,0 100%,0 0 !important; background-repeat:no-repeat !important; }
+.wave-section ::part(region-handle-right) { right:0 !important; background-image:linear-gradient(270deg,var(--accent-trim) 0 9px,transparent 9px),linear-gradient(270deg,var(--accent-trim) 0 9px,transparent 9px),linear-gradient(270deg,var(--accent-trim) 0 2px,transparent 2px) !important; background-size:100% 2px,100% 2px,100% 100% !important; background-position:0 0,0 100%,0 0 !important; background-repeat:no-repeat !important; }
+.wave-section ::part(cursor) { width:2px !important; top:6% !important; height:88% !important; background:var(--accent-playhead) !important; border-radius:2px; box-shadow:0 0 5px rgba(255,184,99,.34); }
+.analysis-line { display: grid; grid-template-columns: repeat(4,1fr); align-items: center; padding: 0 3px; }
+.datum { min-width: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 1px; white-space: nowrap; }
+.datum strong { font: 600 13px Bahnschrift,"Cascadia Mono",monospace; line-height: 1; overflow: hidden; text-overflow: ellipsis; }
+.datum small { color: #46535d; font-size: 7px; line-height: 1; font-weight: 700; letter-spacing: .16em; }
+.datum-bpm strong { color: var(--accent-bpm); text-shadow: 0 0 6px rgba(157,222,112,.13); }
+.datum-key strong { color: var(--accent-key); text-shadow: 0 0 6px rgba(185,161,247,.13); }
+.datum-hz strong { color: var(--accent-hz); text-shadow: 0 0 6px rgba(111,168,245,.13); }
+.datum-length strong { color: var(--accent-time); text-shadow: 0 0 6px rgba(126,219,232,.13); }
+.skeleton { width: 29px; height: 3px; display: inline-block; border-radius: 2px; background: #36444d; animation: skeleton-pulse 1.4s ease-in-out infinite; }
+.datum-bpm .skeleton { background: rgba(157,222,112,.32); }
+.datum-key .skeleton { background: rgba(185,161,247,.3); }
+.datum-hz .skeleton { background: rgba(111,168,245,.3); }
+.datum-length .skeleton { background: rgba(126,219,232,.3); }
+.play-action { justify-self:center; align-self:center; display:inline-flex; align-items:center; gap:8px; min-width:104px; min-height:31px; justify-content:center; padding:6px 14px; color:#8fa0aa; background:#182029; border:1px solid rgba(128,151,164,.2); border-radius:16px; box-shadow:inset 0 1px 0 rgba(225,238,244,.07),0 2px 5px rgba(0,0,0,.18); font-size:10px; font-weight:700; letter-spacing:.14em; }
+.play-action:not(:disabled) { color: #bce9f6; box-shadow: inset 0 1px 0 rgba(196,226,241,.09),0 0 7px rgba(63,180,215,.06); }
+.play-action:not(:disabled):hover { color: #f1fbff; border-color: rgba(104,207,234,.25); box-shadow: 0 0 8px rgba(63,180,215,.12); }
+.delete-action { display:inline-flex; align-items:center; gap:6px; padding:4px 7px; color:#8e4b50; font-size:8px; font-weight:700; letter-spacing:.12em; }
+.delete-action:not(:disabled) { color:#db646a; }
+.delete-action:not(:disabled):hover { color:#ff858a; }
+button:disabled { opacity: .2; cursor: default; }
+footer { display:flex; align-items:center; justify-content:flex-end; padding:0 11px; background:var(--panel); }
+.wav-action { display:inline-flex; align-items:center; justify-content:center; gap:8px; min-width:82px; min-height:29px; padding:5px 10px; color:#8798a2; background:#171e25; border:1px solid rgba(128,151,164,.16); border-radius:14px; box-shadow:inset 0 1px 0 rgba(225,238,244,.055); font-size:10px; font-weight:700; letter-spacing:.13em; }
+.wav-action:not(:disabled):hover { color: #48c6e2; }
+@keyframes record-pulse { 50% { opacity: .78; } }
+@keyframes skeleton-pulse { 50% { opacity: .32; } }
+@keyframes waveform-arrive { from { opacity: .35; } to { opacity: 1; } }
