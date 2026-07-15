@@ -1,5 +1,5 @@
 ﻿export const FREE_EXPORTS = 75;
-export const LICENSE_URL = "https://amirsholi.vercel.app/#samplex";
+export const LICENSE_URL = "https://amirsholi.vercel.app/#buy-samplex";
 
 const CREDIT_KEY = "samplexExportCredits";
 const LICENSE_KEY = "samplexLicense";
