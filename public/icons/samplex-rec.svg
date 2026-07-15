@@ -1,18 +1,4 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128">
-  <defs>
-    <radialGradient id="face" cx="38%" cy="30%" r="72%">
-      <stop offset="0" stop-color="#303a43"/>
-      <stop offset="0.58" stop-color="#151b21"/>
-      <stop offset="1" stop-color="#080b0e"/>
-    </radialGradient>
-    <filter id="redGlow" x="-80%" y="-80%" width="260%" height="260%">
-      <feGaussianBlur stdDeviation="5" result="blur"/>
-      <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
-    </filter>
-  </defs>
-  <circle cx="64" cy="64" r="58" fill="#090d11" stroke="#33404a" stroke-width="5"/>
-  <circle cx="64" cy="64" r="48" fill="url(#face)" stroke="#64717a" stroke-opacity=".52" stroke-width="2"/>
-  <circle cx="64" cy="64" r="20" fill="#12090b" stroke="#6d3135" stroke-width="3"/>
-  <circle cx="64" cy="64" r="11" fill="#ff626a" filter="url(#redGlow)"/>
-  <path d="M31 38 A44 44 0 0 1 50 23" fill="none" stroke="#9fb1bc" stroke-opacity=".45" stroke-width="3" stroke-linecap="round"/>
+  <circle cx="64" cy="64" r="40" fill="#111419" stroke="#ff3b43" stroke-width="10"/>
+  <circle cx="64" cy="64" r="13" fill="#ff3b43"/>
 </svg>

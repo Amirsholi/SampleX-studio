@@ -1,28 +1,38 @@
 import { useEffect, useRef, useState } from "react";
 import WaveSurfer from "wavesurfer.js";
 import RegionsPlugin, { type Region } from "wavesurfer.js/dist/plugins/regions.esm.js";
-import { Circle, Download, Pause, Pencil, Play, Square, Trash2 } from "lucide-react";
+import { Circle, Download, KeyRound, Pause, Pencil, Play, RotateCcw, SkipBack, Square, Trash2, X } from "lucide-react";
 import { decodeAudioBlob } from "./audio/decodeAudio";
 import { exportSelectionAsWav } from "./audio/exportWav";
 import { deleteLatestRecording, getLatestRecording } from "./audio/recordingStore";
 import type { ExtensionMessage, ExtensionState } from "./extension/messages";
 import type { AnalysisResult, SelectionRange } from "./types";
+import { activateLicense, consumeExport, FREE_EXPORTS, getAccessState, LICENSE_URL, restoreLicense, shortLicenseId, type AccessState } from "./license/license";
 
 const EMPTY_RANGE = { start: 0, end: 0 };
 const EMPTY_STATE: ExtensionState = { status: "idle" };
+const SESSION_KEY = "samplexEditingSession";
+
+interface EditingSession {
+  recordingCreatedAt: number;
+  range: SelectionRange;
+  sampleName: string;
+}
 
 export default function App() {
   const waveformElement = useRef<HTMLDivElement | null>(null);
+  const waveSection = useRef<HTMLElement | null>(null);
   const liveCanvas = useRef<HTMLCanvasElement | null>(null);
   const waveform = useRef<WaveSurfer | null>(null);
   const region = useRef<Region | null>(null);
-  const leftShade = useRef<Region | null>(null);
-  const rightShade = useRef<Region | null>(null);
   const buffer = useRef<AudioBuffer | null>(null);
   const worker = useRef<Worker | null>(null);
   const analysisTimer = useRef<number | null>(null);
   const objectUrl = useRef<string | null>(null);
   const liveBars = useRef<number[]>([]);
+  const activeRange = useRef<SelectionRange>(EMPTY_RANGE);
+  const recordingCreatedAt = useRef<number | null>(null);
+  const currentSampleName = useRef("No audio captured");
   const [extensionState, setExtensionState] = useState<ExtensionState>(EMPTY_STATE);
   const [sampleName, setSampleName] = useState("No audio captured");
   const [range, setRange] = useState<SelectionRange>(EMPTY_RANGE);
@@ -30,11 +40,21 @@ export default function App() {
   const [analyzing, setAnalyzing] = useState(false);
   const [elapsed, setElapsed] = useState(0);
   const [playing, setPlaying] = useState(false);
+  const [hoverPlayhead, setHoverPlayhead] = useState<number | null>(null);
+  const [uiError, setUiError] = useState<string | null>(null);
+  const [access, setAccess] = useState<AccessState>({ credits: FREE_EXPORTS, unlocked: false });
+  const [licenseOpen, setLicenseOpen] = useState(false);
+  const [licenseCode, setLicenseCode] = useState("");
+  const [licenseBusy, setLicenseBusy] = useState(false);
+  const [licenseMessage, setLicenseMessage] = useState<string | null>(null);
 
   const recording = extensionState.status === "recording";
   const showingCapture = recording || extensionState.status === "stopping";
   const busy = extensionState.status === "starting" || extensionState.status === "stopping";
   const hasAudio = Boolean(buffer.current && objectUrl.current);
+
+  useEffect(() => { activeRange.current = range; }, [range]);
+  useEffect(() => { currentSampleName.current = sampleName; }, [sampleName]);
 
   useEffect(() => {
     worker.current = new Worker(new URL("./audio/analysis.worker.ts", import.meta.url), { type: "module" });
@@ -44,11 +64,15 @@ export default function App() {
     };
     if (hasChrome()) {
       void refreshState();
+      void refreshAccess();
       const storageListener = (changes: Record<string, chrome.storage.StorageChange>) => {
         const next = changes.recordingState?.newValue as ExtensionState | undefined;
-        if (!next) return;
-        setExtensionState(next);
-        if (next.status === "ready") void loadRecording();
+        if (next) {
+          setExtensionState(next);
+          setUiError(next.status === "error" ? next.error ?? "SampleX encountered an error." : null);
+          if (next.status === "ready") void loadRecording();
+        }
+        if (changes.samplexExportCredits || changes.samplexLicense || changes.samplexRedeemedLicenses) void refreshAccess();
       };
       const messageListener = (message: ExtensionMessage) => {
         if (message.type === "LIVE_WAVEFORM") drawLiveWaveform(message.samples);
@@ -76,9 +100,18 @@ export default function App() {
   }, [recording, extensionState.startedAt, extensionState.status]);
 
   async function refreshState() {
-    const next = await chrome.runtime.sendMessage({ type: "GET_STATE" } satisfies ExtensionMessage) as ExtensionState;
-    setExtensionState(next);
-    if (next.status === "ready") await loadRecording();
+    try {
+      const next = await chrome.runtime.sendMessage({ type: "GET_STATE" } satisfies ExtensionMessage) as ExtensionState;
+      setExtensionState(next);
+      setUiError(next.status === "error" ? next.error ?? "SampleX encountered an error." : null);
+      if (next.status === "ready") await loadRecording();
+    } catch (error) {
+      setUiError(errorMessage(error));
+    }
+  }
+
+  async function refreshAccess() {
+    setAccess(await getAccessState());
   }
 
   async function loadRecording() {
@@ -90,83 +123,106 @@ export default function App() {
     const url = URL.createObjectURL(stored.blob);
     objectUrl.current = url;
     buffer.current = decoded;
-    setSampleName(stored.sourceTitle || "Untitled sample");
+    recordingCreatedAt.current = stored.createdAt;
+    const saved = hasChrome() ? (await chrome.storage.local.get(SESSION_KEY))[SESSION_KEY] as EditingSession | undefined : undefined;
+    const restored = saved?.recordingCreatedAt === stored.createdAt ? saved : undefined;
+    const loadedName = buildEditableName(restored?.sampleName || stored.sourceTitle || "Untitled sample");
+    currentSampleName.current = loadedName;
+    setSampleName(loadedName);
     setElapsed(decoded.duration);
-    mountWaveform(url);
+    mountWaveform(url, restored?.range);
   }
 
-  function mountWaveform(url: string) {
+  function mountWaveform(url: string, restoredRange?: SelectionRange) {
     if (!waveformElement.current) return;
     const regions = RegionsPlugin.create();
     const instance = WaveSurfer.create({
       container: waveformElement.current,
       url,
-      height: 140,
+      height: 111,
       waveColor: ["#53616b", "#aab8bf", "#667681"],
-      progressColor: ["#9cc7cd", "#f0e2c8", "#78b8c2"],
-      cursorColor: "#ffb45f",
+      progressColor: ["#91bac5", "#e7f2f4", "#70bfd0"],
+      cursorColor: "#ffd7a3",
       cursorWidth: 2,
       barWidth: 2,
       barGap: 2,
       barRadius: 0,
       normalize: true,
-      interact: true,
+      interact: false,
       plugins: [regions],
     });
     waveform.current = instance;
     instance.on("play", () => setPlaying(true));
     instance.on("pause", () => setPlaying(false));
-    instance.on("finish", () => setPlaying(false));
+    instance.on("finish", () => {
+      setPlaying(false);
+      instance.setTime(activeRange.current.start);
+    });
+    instance.on("timeupdate", (currentTime) => {
+      const selection = activeRange.current;
+      if (selection.end <= selection.start || currentTime < selection.end - .01) return;
+      instance.pause();
+      instance.setTime(selection.start);
+      setPlaying(false);
+    });
     instance.on("ready", () => {
       const duration = instance.getDuration();
-      const startShade = regions.addRegion({ id: "trim-shade-start", start: 0, end: 0, color: "rgba(2, 5, 8, .68)", drag: false, resize: false });
-      const endShade = regions.addRegion({ id: "trim-shade-end", start: duration, end: duration, color: "rgba(2, 5, 8, .68)", drag: false, resize: false });
-      if (startShade.element) startShade.element.style.pointerEvents = "none";
-      if (endShade.element) endShade.element.style.pointerEvents = "none";
-      if (startShade.element) startShade.element.style.display = "none";
-      if (endShade.element) endShade.element.style.display = "none";
-      leftShade.current = startShade;
-      rightShade.current = endShade;
-      const selection = regions.addRegion({ id: "trim-selection", start: 0, end: duration, color: "rgba(255, 178, 92, .035)", drag: false, resize: true, minLength: .08 });
+      const restoredStart = Math.max(0, Math.min(restoredRange?.start ?? 0, Math.max(0, duration - .08)));
+      const restoredEnd = Math.max(restoredStart + .08, Math.min(restoredRange?.end ?? duration, duration));
+      const selection = regions.addRegion({ id: "trim-selection", start: restoredStart, end: restoredEnd, color: "transparent", drag: false, resize: true, minLength: .08 });
       region.current = selection;
-      const initial = { start: 0, end: duration };
+      const initial = { start: restoredStart, end: restoredEnd };
+      activeRange.current = initial;
       setRange(initial);
+      instance.setTime(initial.start);
       scheduleAnalysis(initial);
     });
     regions.on("region-update", (selection) => {
       if (selection.id !== "trim-selection") return;
-      syncTrimVisuals(selection, instance.getDuration());
-      setRange({ start: selection.start, end: selection.end });
+      const next = { start: selection.start, end: selection.end };
+      activeRange.current = next;
+      setRange(next);
     });
     regions.on("region-updated", (selection) => {
       if (selection.id !== "trim-selection") return;
       const next = { start: selection.start, end: selection.end };
-      syncTrimVisuals(selection, instance.getDuration());
+      activeRange.current = next;
       setRange(next);
+      instance.setTime(next.start);
+      if (instance.isPlaying()) void instance.play(next.start);
+      void persistEditingSession(next, currentSampleName.current);
       scheduleAnalysis(next);
     });
   }
 
   async function toggleRecording() {
     if (!hasChrome() || busy) return;
-    if (recording) {
-      setAnalyzing(true);
-      await chrome.runtime.sendMessage({ type: "STOP_RECORDING" } satisfies ExtensionMessage);
-      return;
+    setUiError(null);
+    try {
+      if (recording) {
+        setAnalyzing(true);
+        const response = await chrome.runtime.sendMessage({ type: "STOP_RECORDING" } satisfies ExtensionMessage) as { ok?: boolean; error?: string };
+        if (response?.ok === false) throw new Error(response.error ?? "Recording could not stop.");
+        return;
+      }
+      await clearSample(false);
+      liveBars.current = [];
+      setSampleName("Capturing active tab");
+      const response = await chrome.runtime.sendMessage({ type: "START_RECORDING" } satisfies ExtensionMessage) as { ok?: boolean; error?: string };
+      if (response?.ok === false) throw new Error(response.error ?? "Recording could not start.");
+      await refreshState();
+    } catch (error) {
+      setAnalyzing(false);
+      setUiError(errorMessage(error));
+      await refreshState();
     }
-    await clearSample(false);
-    liveBars.current = [];
-    setSampleName("Capturing active tab");
-    await chrome.runtime.sendMessage({ type: "START_RECORDING" } satisfies ExtensionMessage);
-    await refreshState();
   }
 
   async function clearSample(resetState = true) {
     waveform.current?.destroy();
     waveform.current = null;
     region.current = null;
-    leftShade.current = null;
-    rightShade.current = null;
+    recordingCreatedAt.current = null;
     buffer.current = null;
     if (objectUrl.current) URL.revokeObjectURL(objectUrl.current);
     objectUrl.current = null;
@@ -174,9 +230,11 @@ export default function App() {
     setAnalysis(null);
     setAnalyzing(false);
     setElapsed(0);
+    currentSampleName.current = "No audio captured";
     setSampleName("No audio captured");
     liveBars.current = [];
     await deleteLatestRecording();
+    if (hasChrome()) await chrome.storage.local.remove(SESSION_KEY);
     if (resetState && hasChrome()) {
       await chrome.storage.local.set({ recordingState: EMPTY_STATE });
       setExtensionState(EMPTY_STATE);
@@ -194,34 +252,107 @@ export default function App() {
     }, 350);
   }
 
-  function download() {
+  async function download() {
     if (!buffer.current || range.end <= range.start) return;
-    const wav = exportSelectionAsWav(buffer.current, range);
-    const url = URL.createObjectURL(wav);
-    const anchor = document.createElement("a");
-    anchor.href = url;
-    anchor.download = `${safeName(sampleName)}.wav`;
-    anchor.click();
-    window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+    if (!access.unlocked && access.credits <= 0) {
+      setLicenseOpen(true);
+      return;
+    }
+    try {
+      const wav = exportSelectionAsWav(buffer.current, range);
+      const nextAccess = await consumeExport();
+      const url = URL.createObjectURL(wav);
+      const anchor = document.createElement("a");
+      anchor.href = url;
+      anchor.download = buildDownloadName(sampleName, analysis);
+      anchor.click();
+      setAccess(nextAccess);
+      window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+    } catch (error) {
+      setUiError(errorMessage(error));
+    }
+  }
+
+  async function submitLicense(event: React.FormEvent) {
+    event.preventDefault();
+    if (!licenseCode.trim() || licenseBusy) return;
+    setLicenseBusy(true);
+    setLicenseMessage(null);
+    try {
+      const next = await activateLicense(licenseCode);
+      setAccess(next);
+      setLicenseCode("");
+      setLicenseMessage(next.unlocked ? "SampleX is permanently unlocked." : `${next.credits} exports available.`);
+    } catch (error) {
+      setLicenseMessage(errorMessage(error));
+    } finally {
+      setLicenseBusy(false);
+    }
+  }
+
+  async function handleRestore() {
+    setLicenseBusy(true);
+    setLicenseMessage(null);
+    try {
+      const next = await restoreLicense();
+      setAccess(next);
+      setLicenseMessage(next.unlocked ? "License restored." : "No permanent license was found in Chrome Sync.");
+    } finally {
+      setLicenseBusy(false);
+    }
   }
 
   function togglePlayback() {
     if (!waveform.current) return;
     if (waveform.current.isPlaying()) waveform.current.pause();
-    else void waveform.current.play(waveform.current.getCurrentTime());
+    else {
+      const currentTime = waveform.current.getCurrentTime();
+      const startTime = currentTime < range.start || currentTime >= range.end ? range.start : currentTime;
+      waveform.current.setTime(startTime);
+      void waveform.current.play(startTime);
+    }
   }
 
-  function syncTrimVisuals(selection: Region, duration: number) {
-    const start = leftShade.current;
-    const end = rightShade.current;
-    if (start) {
-      start.setOptions({ start: 0, end: Math.max(0, selection.start) });
-      if (start.element) start.element.style.display = selection.start > 0.001 ? "block" : "none";
-    }
-    if (end) {
-      end.setOptions({ start: Math.min(duration, selection.end), end: duration });
-      if (end.element) end.element.style.display = selection.end < duration - 0.001 ? "block" : "none";
-    }
+  function restartSelection() {
+    if (!waveform.current) return;
+    const wasPlaying = waveform.current.isPlaying();
+    waveform.current.setTime(range.start);
+    if (wasPlaying) void waveform.current.play(range.start);
+  }
+
+  async function persistEditingSession(nextRange: SelectionRange, nextName: string) {
+    if (!hasChrome() || recordingCreatedAt.current === null) return;
+    const session: EditingSession = { recordingCreatedAt: recordingCreatedAt.current, range: nextRange, sampleName: nextName };
+    await chrome.storage.local.set({ [SESSION_KEY]: session });
+  }
+
+  function renameSample(nextName: string) {
+    currentSampleName.current = nextName;
+    setSampleName(nextName);
+    void persistEditingSession(activeRange.current, nextName);
+  }
+
+  function wavePosition(clientX: number) {
+    const element = waveSection.current;
+    if (!element) return 0;
+    const bounds = element.getBoundingClientRect();
+    return Math.max(0, Math.min(1, (clientX - bounds.left) / bounds.width));
+  }
+
+  function isTrimControl(target: EventTarget | null) {
+    return target instanceof Element && Boolean(target.closest('[part*="region-handle"]'));
+  }
+
+  function previewPlayhead(event: React.PointerEvent<HTMLElement>) {
+    if (!hasAudio || isTrimControl(event.target)) return;
+    setHoverPlayhead(wavePosition(event.clientX) * 100);
+  }
+
+  function commitPlayhead(event: React.MouseEvent<HTMLElement>) {
+    if (!hasAudio || !waveform.current || isTrimControl(event.target)) return;
+    const nextTime = wavePosition(event.clientX) * waveform.current.getDuration();
+    waveform.current.setTime(nextTime);
+    setHoverPlayhead(null);
   }
 
   function drawLiveWaveform(samples: number[]) {
@@ -265,35 +396,54 @@ export default function App() {
 
   const loading = analyzing || extensionState.status === "stopping";
   const duration = hasAudio ? range.end - range.start : recording ? elapsed : 0;
+  const sourceDuration = buffer.current?.duration ?? 0;
+  const trimStart = sourceDuration ? (range.start / sourceDuration) * 100 : 0;
+  const trimEnd = sourceDuration ? (range.end / sourceDuration) * 100 : 100;
 
   return (
     <main className="samplex">
       <header className="sample-header">
         <strong className="brand">SAMPLEX</strong>
+        <div className="license-controls">
+          <button className="license-button" type="button" onClick={() => setLicenseOpen(true)} aria-label="License settings" title="License settings"><KeyRound size={12} /></button>
+        </div>
+        {uiError && <span className="error-toast" role="alert" title={uiError}>{uiError}</span>}
       </header>
 
       <section className="instrument-stage">
         <aside className="side-control rec-side">
-          <button className={`rec-action ${recording ? "active" : ""}`} onClick={toggleRecording} disabled={busy}>
-            <span className="control-face">{recording ? <Square size={11} fill="currentColor" /> : <Circle size={13} />}</span>
-            <span>{busy ? "WAIT" : recording ? "STOP" : "REC"}</span>
-          </button>
+          <div className="rec-stack">
+            <button className={`rec-action ${recording ? "active" : ""}`} onClick={toggleRecording} disabled={busy}>
+              <span className="control-face">{recording ? <Square size={11} fill="currentColor" /> : <Circle size={13} />}</span>
+              <span>{busy ? "WAIT" : recording ? "STOP" : "REC"}</span>
+            </button>
+            <button className="credit-display" data-level={creditLevel(access)} type="button" onClick={() => setLicenseOpen(true)} aria-label={access.unlocked ? "Permanent license active" : `${access.credits} exports remaining`} title={access.unlocked ? "Permanent license" : `${access.credits} exports remaining`}>
+              {access.unlocked ? "∞" : String(access.credits).padStart(2, "0")}
+            </button>
+          </div>
         </aside>
 
         <div className="audio-core">
           <div className="file-row">
             <label className={`name-field ${hasAudio ? "editable" : ""}`}>
               <Pencil size={11} />
-              <input aria-label="Sample name" value={sampleName} onChange={(event) => setSampleName(event.target.value)} disabled={!hasAudio} />
+              <input aria-label="Sample name" value={sampleName} onChange={(event) => renameSample(event.target.value)} disabled={!hasAudio} />
             </label>
             <button className="delete-action" onClick={() => void clearSample()} disabled={!hasAudio || recording}><Trash2 size={13} /><span>DELETE</span></button>
           </div>
 
           <div className="display-frame">
-            <section className="wave-section" title={hasAudio ? "Drag the edge handles to trim the sample." : undefined}>
+            <section ref={waveSection} className="wave-section" title={hasAudio ? "Drag the brackets to trim. Hover to preview a position and click to place the playhead." : undefined} onPointerMove={previewPlayhead} onPointerLeave={() => setHoverPlayhead(null)} onClick={commitPlayhead}>
               {!hasAudio && <div className="flat-wave" />}
               {showingCapture && <canvas ref={liveCanvas} className="live-wave" />}
               <div ref={waveformElement} className={hasAudio ? "wave-ready" : "wave-ready hidden"} />
+              {hasAudio && <>
+                <span className="trim-mask trim-mask-left" style={{ width: `${trimStart}%` }} />
+                <span className="trim-mask trim-mask-right" style={{ left: `${trimEnd}%` }} />
+                <span className="trim-bracket trim-bracket-left" style={{ left: `${trimStart}%` }} />
+                <span className="trim-bracket trim-bracket-right" style={{ left: `${trimEnd}%` }} />
+                {hoverPlayhead !== null && <span className="hover-playhead" style={{ left: `${hoverPlayhead}%` }} />}
+              </>}
             </section>
           </div>
 
@@ -304,17 +454,69 @@ export default function App() {
             <Datum loading={loading} value={formatTime(duration)} label="LENGTH" />
           </section>
 
-          <button className="play-action" onClick={togglePlayback} disabled={!hasAudio}>
-            {playing ? <Pause size={15} fill="currentColor" /> : <Play size={15} fill="currentColor" />}
-            {playing ? "PAUSE" : "PLAY"}
+          <button className="play-action" onClick={togglePlayback} disabled={!hasAudio} aria-label={playing ? "Pause" : "Play"} title={playing ? "Pause" : "Play"}>
+            {playing ? <Pause size={16} fill="currentColor" /> : <Play size={17} fill="currentColor" />}
+          </button>
+          <button className="restart-action" onClick={restartSelection} disabled={!hasAudio} aria-label="Return to trim start" title="Return to trim start">
+            <SkipBack size={16} fill="currentColor" />
           </button>
         </div>
       </section>
 
       <footer>
-        <button className="wav-action" onClick={download} disabled={!hasAudio || loading}><Download size={15} /> WAV</button>
+        <button className="wav-action" onClick={() => void download()} disabled={!hasAudio || loading} aria-label="Download WAV" title="Download WAV"><Download size={17} /></button>
       </footer>
+
+      {!access.unlocked && access.credits <= 0 && (
+        <div className="license-lock" role="dialog" aria-modal="true" aria-label="SampleX activation required">
+          <ActivationForm code={licenseCode} busy={licenseBusy} message={licenseMessage} onCode={setLicenseCode} onSubmit={submitLicense} />
+        </div>
+      )}
+
+      {licenseOpen && access.credits > 0 && !access.unlocked && (
+        <LicensePanel access={access} code={licenseCode} busy={licenseBusy} message={licenseMessage} onClose={() => setLicenseOpen(false)} onCode={setLicenseCode} onSubmit={submitLicense} onRestore={handleRestore} />
+      )}
+      {licenseOpen && access.unlocked && (
+        <LicensePanel access={access} code={licenseCode} busy={licenseBusy} message={licenseMessage} onClose={() => setLicenseOpen(false)} onCode={setLicenseCode} onSubmit={submitLicense} onRestore={handleRestore} />
+      )}
     </main>
+  );
+}
+
+interface LicenseUiProps {
+  code: string;
+  busy: boolean;
+  message: string | null;
+  onCode: (value: string) => void;
+  onSubmit: (event: React.FormEvent) => void;
+}
+
+function ActivationForm({ code, busy, message, onCode, onSubmit }: LicenseUiProps) {
+  return (
+    <div className="activation-card">
+      <KeyRound size={18} />
+      <form onSubmit={onSubmit}>
+        <input value={code} onChange={(event) => onCode(event.target.value)} placeholder="SAMPLEX LICENSE" aria-label="SampleX license code" autoComplete="off" spellCheck={false} />
+        <button type="submit" disabled={busy || !code.trim()}>{busy ? "CHECKING" : "ACTIVATE"}</button>
+      </form>
+      {message && <p role="status">{message}</p>}
+      <a href={LICENSE_URL} target="_blank" rel="noreferrer">GET LICENSE</a>
+    </div>
+  );
+}
+
+function LicensePanel({ access, code, busy, message, onClose, onCode, onSubmit, onRestore }: LicenseUiProps & { access: AccessState; onClose: () => void; onRestore: () => void }) {
+  return (
+    <div className="license-panel-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}>
+      <section className="license-panel" role="dialog" aria-modal="true" aria-labelledby="license-title">
+        <button className="license-close" type="button" onClick={onClose} aria-label="Close license settings"><X size={14} /></button>
+        <span className="license-kicker">LICENSE</span>
+        <strong id="license-title">{access.unlocked ? "PERMANENT" : `${access.credits} EXPORTS`}</strong>
+        <small>{shortLicenseId(access.licenseId)}</small>
+        <ActivationForm code={code} busy={busy} message={message} onCode={onCode} onSubmit={onSubmit} />
+        <button className="restore-button" type="button" onClick={onRestore} disabled={busy}><RotateCcw size={11} /> RESTORE</button>
+      </section>
+    </div>
   );
 }
 
@@ -322,5 +524,28 @@ function Datum({ value, label, loading }: { value: string; label: string; loadin
   return <span className={`datum datum-${label.toLowerCase()}`}>{loading ? <i className="skeleton" /> : <strong>{value}</strong>}<small>{label}</small></span>;
 }
 function hasChrome() { return typeof chrome !== "undefined" && Boolean(chrome.runtime?.id); }
+function errorMessage(error: unknown) { return error instanceof Error ? error.message : String(error); }
+function creditLevel(access: AccessState) {
+  if (access.unlocked) return "unlocked";
+  if (access.credits <= 0) return "empty";
+  if (access.credits <= 10) return "low";
+  return "normal";
+}
 function formatTime(seconds: number) { return `${Math.floor(seconds / 60).toString().padStart(2, "0")}:${Math.floor(seconds % 60).toString().padStart(2, "0")}`; }
 function safeName(value: string) { return value.replace(/[<>:"/\\|?*\u0000-\u001F]/g, " ").trim().slice(0, 80) || "SampleX Recording"; }
+function buildEditableName(value: string) {
+  return safeName(value)
+    .replace(/\s*[-|]\s*YouTube\s*$/i, "")
+    .replace(/\s*\((official\s+)?(music\s+)?video\)\s*/ig, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, 30)
+    .trim() || "samplex";
+}
+function buildDownloadName(value: string, analysis: AnalysisResult | null) {
+  const base = buildEditableName(value);
+  const bpm = analysis?.bpm ? `${Math.round(analysis.bpm)}bpm` : "";
+  const key = analysis?.key ?? analysis?.note ?? "";
+  const keyToken = key.replace(/#/g, "sharp").replace(/♭/g, "flat").replace(/\s+/g, "-").toLowerCase();
+  return `${safeName([base, bpm, keyToken].filter(Boolean).join("_"))}.wav`;
+}

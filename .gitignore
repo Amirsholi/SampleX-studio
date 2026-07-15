@@ -5,3 +5,5 @@ vite.config.js
 vite.config.d.ts
 design-qa-*.png
 design-qa-prototype.png
+*.pem
+license-registry.jsonl

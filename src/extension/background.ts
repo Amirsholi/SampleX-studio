@@ -2,11 +2,14 @@ import type { ExtensionMessage, ExtensionState } from "./messages";
 
 const DEFAULT_STATE: ExtensionState = { status: "idle" };
 
-chrome.runtime.onInstalled.addListener(() => void setState(DEFAULT_STATE));
+chrome.runtime.onInstalled.addListener(() => void initializeState());
 
 chrome.action.onClicked.addListener((tab) => {
   if (!tab.id) return;
-  void chrome.scripting.executeScript({ target: { tabId: tab.id }, files: ["assets/panelHost.js"] }).catch(() => undefined);
+  void chrome.scripting.executeScript({ target: { tabId: tab.id }, files: ["assets/panelHost.js"] }).catch((error: unknown) => {
+    const message = error instanceof Error ? error.message : String(error);
+    void setState({ status: "error", error: friendlyCaptureError(message) });
+  });
 });
 
 chrome.runtime.onMessage.addListener((message: ExtensionMessage, _sender, sendResponse) => {
@@ -23,6 +26,8 @@ async function handleMessage(message: ExtensionMessage) {
   if (message.type === "GET_STATE") return getState();
 
   if (message.type === "START_RECORDING") {
+    const current = await getState();
+    if (["starting", "recording", "stopping"].includes(current.status)) throw new Error("A recording is already in progress.");
     const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
     if (!tab?.id) throw new Error("No active tab is available.");
     await setState({ status: "starting", sourceTitle: tab.title ?? "Tab audio", sourceTabId: tab.id });
@@ -35,6 +40,7 @@ async function handleMessage(message: ExtensionMessage) {
 
   if (message.type === "STOP_RECORDING") {
     const current = await getState();
+    if (current.status !== "recording") return { ok: true };
     await setState({ ...current, status: "stopping" });
     await chrome.runtime.sendMessage({ type: "OFFSCREEN_STOP" } satisfies ExtensionMessage);
     return { ok: true };
@@ -69,4 +75,16 @@ async function getState(): Promise<ExtensionState> {
 
 async function setState(state: ExtensionState) {
   await chrome.storage.local.set({ recordingState: state });
+}
+
+async function initializeState() {
+  const stored = await chrome.storage.local.get("recordingState");
+  if (!stored.recordingState) await setState(DEFAULT_STATE);
+}
+
+function friendlyCaptureError(message: string) {
+  if (/cannot access|chrome:\/\/|edge:\/\/|web store/i.test(message)) {
+    return "SampleX cannot run on this protected browser page. Open a regular website and try again.";
+  }
+  return message;
 }

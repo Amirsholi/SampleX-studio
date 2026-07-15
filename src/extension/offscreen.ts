@@ -7,6 +7,7 @@ let audioContext: AudioContext | null = null;
 let chunks: BlobPart[] = [];
 let sourceTitle = "Tab audio";
 let liveTimer: number | null = null;
+let stopPromise: Promise<void> | null = null;
 
 chrome.runtime.onMessage.addListener((message: ExtensionMessage, _sender, sendResponse) => {
   if (message.type === "OFFSCREEN_START") {
@@ -30,33 +31,48 @@ async function start(streamId: string, title: string) {
   if (recorder?.state === "recording") throw new Error("A recording is already active.");
   sourceTitle = title;
   chunks = [];
-  captureStream = await navigator.mediaDevices.getUserMedia({
-    audio: { mandatory: { chromeMediaSource: "tab", chromeMediaSourceId: streamId } } as MediaTrackConstraints,
-    video: false,
-  });
+  try {
+    captureStream = await navigator.mediaDevices.getUserMedia({
+      audio: { mandatory: { chromeMediaSource: "tab", chromeMediaSourceId: streamId } } as MediaTrackConstraints,
+      video: false,
+    });
 
-  audioContext = new AudioContext();
-  const source = audioContext.createMediaStreamSource(captureStream);
-  source.connect(audioContext.destination);
-  const analyser = audioContext.createAnalyser();
-  analyser.fftSize = 256;
-  source.connect(analyser);
-  const waveform = new Uint8Array(analyser.frequencyBinCount);
-  liveTimer = window.setInterval(() => {
-    analyser.getByteTimeDomainData(waveform);
-    void chrome.runtime.sendMessage({ type: "LIVE_WAVEFORM", samples: Array.from(waveform) } satisfies ExtensionMessage).catch(() => undefined);
-  }, 70);
+    audioContext = new AudioContext();
+    const source = audioContext.createMediaStreamSource(captureStream);
+    source.connect(audioContext.destination);
+    const analyser = audioContext.createAnalyser();
+    analyser.fftSize = 256;
+    source.connect(analyser);
+    const waveform = new Uint8Array(analyser.frequencyBinCount);
+    liveTimer = window.setInterval(() => {
+      analyser.getByteTimeDomainData(waveform);
+      void chrome.runtime.sendMessage({ type: "LIVE_WAVEFORM", samples: Array.from(waveform) } satisfies ExtensionMessage).catch(() => undefined);
+    }, 70);
 
-  const mimeType = ["audio/webm;codecs=opus", "audio/webm"].find(MediaRecorder.isTypeSupported);
-  recorder = new MediaRecorder(captureStream, mimeType ? { mimeType } : undefined);
-  recorder.ondataavailable = (event) => { if (event.data.size) chunks.push(event.data); };
-  recorder.start(250);
-  captureStream.getAudioTracks()[0]?.addEventListener("ended", () => void stop());
+    const mimeType = ["audio/webm;codecs=opus", "audio/webm"].find(MediaRecorder.isTypeSupported);
+    recorder = new MediaRecorder(captureStream, mimeType ? { mimeType } : undefined);
+    recorder.ondataavailable = (event) => { if (event.data.size) chunks.push(event.data); };
+    recorder.start(250);
+    captureStream.getAudioTracks()[0]?.addEventListener("ended", () => void stop());
+  } catch (error) {
+    cleanup();
+    throw error;
+  }
 }
 
 async function stop() {
+  if (stopPromise) return stopPromise;
   if (!recorder || recorder.state === "inactive") return;
-  const activeRecorder = recorder;
+  stopPromise = finishRecording();
+  try {
+    await stopPromise;
+  } finally {
+    stopPromise = null;
+  }
+}
+
+async function finishRecording() {
+  const activeRecorder = recorder!;
   await new Promise<void>((resolve) => {
     activeRecorder.addEventListener("stop", () => resolve(), { once: true });
     activeRecorder.stop();
