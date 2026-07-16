@@ -1,4 +1,5 @@
 import { saveLatestRecording } from "../audio/recordingStore";
+import { encodeFloat32Wav } from "../audio/encodeFloatWav";
 import type { ExtensionMessage } from "./messages";
 
 let recorder: MediaRecorder | null = null;
@@ -8,6 +9,9 @@ let chunks: BlobPart[] = [];
 let sourceTitle = "Tab audio";
 let liveTimer: number | null = null;
 let stopPromise: Promise<void> | null = null;
+let workletNode: AudioWorkletNode | null = null;
+let pcmChunks: Float32Array[][] = [];
+let captureMode: "pcm" | "media-recorder" | null = null;
 
 chrome.runtime.onMessage.addListener((message: ExtensionMessage, _sender, sendResponse) => {
   if (message.type === "OFFSCREEN_START") {
@@ -31,6 +35,7 @@ async function start(streamId: string, title: string) {
   if (recorder?.state === "recording") throw new Error("A recording is already active.");
   sourceTitle = title;
   chunks = [];
+  pcmChunks = [];
   try {
     captureStream = await navigator.mediaDevices.getUserMedia({
       audio: { mandatory: { chromeMediaSource: "tab", chromeMediaSourceId: streamId } } as MediaTrackConstraints,
@@ -39,7 +44,6 @@ async function start(streamId: string, title: string) {
 
     audioContext = new AudioContext();
     const source = audioContext.createMediaStreamSource(captureStream);
-    source.connect(audioContext.destination);
     const analyser = audioContext.createAnalyser();
     analyser.fftSize = 256;
     source.connect(analyser);
@@ -49,10 +53,17 @@ async function start(streamId: string, title: string) {
       void chrome.runtime.sendMessage({ type: "LIVE_WAVEFORM", samples: Array.from(waveform) } satisfies ExtensionMessage).catch(() => undefined);
     }, 70);
 
-    const mimeType = ["audio/webm;codecs=opus", "audio/webm"].find(MediaRecorder.isTypeSupported);
-    recorder = new MediaRecorder(captureStream, mimeType ? { mimeType } : undefined);
-    recorder.ondataavailable = (event) => { if (event.data.size) chunks.push(event.data); };
-    recorder.start(250);
+    try {
+      await startPcmCapture(source, audioContext);
+      captureMode = "pcm";
+    } catch {
+      source.connect(audioContext.destination);
+      const mimeType = ["audio/webm;codecs=opus", "audio/webm"].find(MediaRecorder.isTypeSupported);
+      recorder = new MediaRecorder(captureStream, mimeType ? { mimeType, audioBitsPerSecond: 256_000 } : { audioBitsPerSecond: 256_000 });
+      recorder.ondataavailable = (event) => { if (event.data.size) chunks.push(event.data); };
+      recorder.start(250);
+      captureMode = "media-recorder";
+    }
     captureStream.getAudioTracks()[0]?.addEventListener("ended", () => void stop());
   } catch (error) {
     cleanup();
@@ -62,7 +73,7 @@ async function start(streamId: string, title: string) {
 
 async function stop() {
   if (stopPromise) return stopPromise;
-  if (!recorder || recorder.state === "inactive") return;
+  if (!captureMode) return;
   stopPromise = finishRecording();
   try {
     await stopPromise;
@@ -72,12 +83,20 @@ async function stop() {
 }
 
 async function finishRecording() {
-  const activeRecorder = recorder!;
-  await new Promise<void>((resolve) => {
-    activeRecorder.addEventListener("stop", () => resolve(), { once: true });
-    activeRecorder.stop();
-  });
-  const blob = new Blob(chunks, { type: activeRecorder.mimeType || "audio/webm" });
+  let blob: Blob;
+  if (captureMode === "pcm") {
+    await flushPcmCapture();
+    const channels = mergePcmChunks(pcmChunks);
+    const wav = encodeFloat32Wav(channels, audioContext?.sampleRate ?? 48_000);
+    blob = new Blob([wav], { type: "audio/wav" });
+  } else {
+    const activeRecorder = recorder!;
+    await new Promise<void>((resolve) => {
+      activeRecorder.addEventListener("stop", () => resolve(), { once: true });
+      activeRecorder.stop();
+    });
+    blob = new Blob(chunks, { type: activeRecorder.mimeType || "audio/webm" });
+  }
   cleanup();
   if (!blob.size) throw new Error("No audio was recorded.");
   await saveLatestRecording({ blob, createdAt: Date.now(), sourceTitle });
@@ -90,7 +109,51 @@ function cleanup() {
   captureStream?.getTracks().forEach((track) => track.stop());
   void audioContext?.close();
   recorder = null;
+  workletNode?.disconnect();
+  workletNode = null;
   captureStream = null;
   audioContext = null;
   chunks = [];
+  pcmChunks = [];
+  captureMode = null;
+}
+
+async function startPcmCapture(source: MediaStreamAudioSourceNode, context: AudioContext) {
+  await context.audioWorklet.addModule(chrome.runtime.getURL("pcm-capture-worklet.js"));
+  workletNode = new AudioWorkletNode(context, "samplex-pcm-capture");
+  workletNode.port.onmessage = (event: MessageEvent<{ type: string; channels?: Float32Array[] }>) => {
+    if (event.data.type !== "PCM_CHUNK" || !event.data.channels) return;
+    if (pcmChunks.length !== event.data.channels.length) {
+      pcmChunks = Array.from({ length: event.data.channels.length }, () => []);
+    }
+    event.data.channels.forEach((channel, index) => pcmChunks[index].push(channel));
+  };
+  source.connect(workletNode);
+  workletNode.connect(context.destination);
+}
+
+function flushPcmCapture() {
+  return new Promise<void>((resolve) => {
+    if (!workletNode) return resolve();
+    const handleMessage = (event: MessageEvent<{ type: string }>) => {
+      if (event.data.type !== "FLUSHED") return;
+      workletNode?.port.removeEventListener("message", handleMessage);
+      resolve();
+    };
+    workletNode.port.addEventListener("message", handleMessage);
+    workletNode.port.postMessage({ type: "FLUSH" });
+  });
+}
+
+function mergePcmChunks(chunksByChannel: Float32Array[][]) {
+  return chunksByChannel.map((channelChunks) => {
+    const length = channelChunks.reduce((sum, chunk) => sum + chunk.length, 0);
+    const channel = new Float32Array(length);
+    let offset = 0;
+    for (const chunk of channelChunks) {
+      channel.set(chunk, offset);
+      offset += chunk.length;
+    }
+    return channel;
+  });
 }
