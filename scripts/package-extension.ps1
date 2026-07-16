@@ -5,7 +5,7 @@ $dist = Join-Path $root "dist"
 $releaseDirectory = Join-Path $root "releases"
 $folderName = "SampleX"
 $stagingDirectory = Join-Path $releaseDirectory $folderName
-$archive = Join-Path $releaseDirectory "SampleX-beta-$($package.version).zip"
+$archive = Join-Path $releaseDirectory "SampleX-demo-trial-$($package.version).zip"
 
 if (-not (Test-Path -LiteralPath (Join-Path $dist "manifest.json"))) {
   throw "The extension build is missing dist/manifest.json."
@@ -23,6 +23,29 @@ if (Test-Path -LiteralPath $stagingDirectory) {
 }
 
 Copy-Item -LiteralPath $dist -Destination $stagingDirectory -Recurse
-Compress-Archive -LiteralPath $stagingDirectory -DestinationPath $archive -CompressionLevel Optimal -Force
+if (Test-Path -LiteralPath $archive) {
+  Remove-Item -LiteralPath $archive -Force
+}
+Add-Type -AssemblyName System.IO.Compression
+Add-Type -AssemblyName System.IO.Compression.FileSystem
+$archiveStream = [IO.File]::Open($archive, [IO.FileMode]::CreateNew)
+$zip = [IO.Compression.ZipArchive]::new($archiveStream, [IO.Compression.ZipArchiveMode]::Create, $false)
+try {
+  Get-ChildItem -LiteralPath $stagingDirectory -File -Recurse | ForEach-Object {
+    $relativePath = $_.FullName.Substring($resolvedStaging.Length).TrimStart([char[]]@('\', '/')).Replace('\', '/')
+    $entry = $zip.CreateEntry($relativePath, [IO.Compression.CompressionLevel]::Optimal)
+    $sourceStream = [IO.File]::OpenRead($_.FullName)
+    $entryStream = $entry.Open()
+    try {
+      $sourceStream.CopyTo($entryStream)
+    } finally {
+      $entryStream.Dispose()
+      $sourceStream.Dispose()
+    }
+  }
+} finally {
+  $zip.Dispose()
+  $archiveStream.Dispose()
+}
 Remove-Item -LiteralPath $stagingDirectory -Recurse -Force
 Write-Output $archive

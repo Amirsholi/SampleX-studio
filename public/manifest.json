@@ -27,7 +27,7 @@
     "type": "module"
   },
   "web_accessible_resources": [{
-    "resources": ["popup.html", "assets/*"],
+    "resources": ["popup.html"],
     "matches": ["http://*/*", "https://*/*"]
   }]
 }

@@ -1,4 +1,10 @@
-Abrir chrome://extensions.
-Activar “Modo desarrollador”.
-Pulsar “Cargar extensión descomprimida”.
-Seleccionar la carpeta SampleX resultante.
+SAMPLEX DEMO TRIAL
+
+1. Descomprime el ZIP y conserva la carpeta resultante.
+2. Abre chrome://extensions en Chrome.
+3. Activa “Modo desarrollador”.
+4. Pulsa “Cargar extensión descomprimida”.
+5. Selecciona la carpeta de SampleX Demo Trial.
+6. Fija SampleX en la barra de herramientas y ábrelo sobre la pestaña que quieras capturar.
+
+La Demo Trial incluye 75 exportaciones WAV. La grabación, el recorte y el análisis se procesan localmente en el navegador.
