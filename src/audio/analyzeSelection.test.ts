@@ -32,6 +32,21 @@ describe("audio analysis baseline", () => {
     expect(result.note).toBe("A4");
   });
 
+  it("builds tonal context from a polyphonic C major chord", () => {
+    const duration = 3;
+    const frequencies = [261.63, 329.63, 392];
+    const signal = Float32Array.from(
+      { length: Math.floor(SAMPLE_RATE * duration) },
+      (_, sample) => frequencies.reduce(
+        (sum, frequency) => sum + Math.sin(2 * Math.PI * frequency * sample / SAMPLE_RATE) / frequencies.length,
+        0,
+      ) * 0.55,
+    );
+
+    const result = analyzePcm([signal], SAMPLE_RATE, { start: 0, end: duration });
+    expect(result.key).toBe("C Major");
+  });
+
   it("rejects selections that are too short for meaningful analysis", () => {
     const signal = new Float32Array(Math.floor(SAMPLE_RATE * 0.1));
     const result = analyzePcm([signal], SAMPLE_RATE, { start: 0, end: 0.1 });
