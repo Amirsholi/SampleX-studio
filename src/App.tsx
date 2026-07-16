@@ -494,7 +494,7 @@ export default function App() {
       </section>
 
       <footer>
-        <button className="wav-action" onClick={() => void download()} disabled={!hasAudio || loading} aria-label="Download WAV" title="Download WAV"><Download size={17} /></button>
+        <button className="wav-action" onClick={() => void download()} disabled={!hasAudio || extensionState.status === "stopping"} aria-label="Download WAV" title={analyzing ? "Download WAV while analysis continues" : "Download WAV"}><Download size={17} /></button>
       </footer>
 
       {licenseOpen && (

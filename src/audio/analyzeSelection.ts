@@ -159,10 +159,15 @@ function estimateBpmFromPeaks(novelty: number[], framesPerSecond: number) {
 function estimatePitchAndKey(samples: Float32Array, sampleRate: number) {
   const windowSize = 4096;
   const hopSize = 2048;
+  const maximumFrames = 48;
+  const availableFrames = Math.max(1, Math.floor((samples.length - windowSize) / hopSize) + 1);
+  const frameStride = Math.max(1, Math.ceil(availableFrames / maximumFrames));
   const chroma = new Array<number>(12).fill(0);
   const pitches: number[] = [];
 
-  for (let offset = 0; offset + windowSize < samples.length; offset += hopSize) {
+  for (let frameIndex = 0; frameIndex < availableFrames; frameIndex += frameStride) {
+    const offset = frameIndex * hopSize;
+    if (offset + windowSize > samples.length) break;
     const frame = samples.subarray(offset, offset + windowSize);
     const rms = Math.sqrt(frame.reduce((sum, value) => sum + value * value, 0) / frame.length);
     if (rms < 0.01) {
