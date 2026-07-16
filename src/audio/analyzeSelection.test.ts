@@ -47,6 +47,20 @@ describe("audio analysis baseline", () => {
     expect(result.key).toBe("C Major");
   });
 
+  it("does not lose analysis when stereo channels are out of phase", () => {
+    const duration = 1.5;
+    const left = Float32Array.from(
+      { length: Math.floor(SAMPLE_RATE * duration) },
+      (_, sample) => Math.sin(2 * Math.PI * 440 * sample / SAMPLE_RATE) * 0.5,
+    );
+    const right = Float32Array.from(left, (sample) => -sample);
+
+    const result = analyzePcm([left, right], SAMPLE_RATE, { start: 0, end: duration });
+    expect(result.frequencyHz).toBeGreaterThan(435);
+    expect(result.frequencyHz).toBeLessThan(445);
+    expect(result.channels).toBe("Stereo");
+  });
+
   it("rejects selections that are too short for meaningful analysis", () => {
     const signal = new Float32Array(Math.floor(SAMPLE_RATE * 0.1));
     const result = analyzePcm([signal], SAMPLE_RATE, { start: 0, end: 0.1 });

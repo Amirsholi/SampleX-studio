@@ -47,11 +47,22 @@ function extractMonoRange(channelData: Float32Array[], sampleRate: number, range
   const endFrame = Math.min(channelData[0]?.length ?? 0, Math.ceil(range.end * sampleRate));
   const length = Math.max(1, endFrame - startFrame);
   const mono = new Float32Array(length);
+  const channelEnergy = new Array<number>(channelData.length).fill(0);
 
-  for (const channel of channelData) {
+  channelData.forEach((channel, channelIndex) => {
     for (let index = 0; index < length; index += 1) {
-      mono[index] += (channel[startFrame + index] ?? 0) / channelData.length;
+      const value = channel[startFrame + index] ?? 0;
+      mono[index] += value / channelData.length;
+      channelEnergy[channelIndex] += value * value;
     }
+  });
+
+  let monoEnergy = 0;
+  for (const value of mono) monoEnergy += value * value;
+  const strongestEnergy = Math.max(...channelEnergy);
+  if (strongestEnergy > 0 && monoEnergy / strongestEnergy < 0.05) {
+    const strongestChannel = channelEnergy.indexOf(strongestEnergy);
+    return channelData[strongestChannel].slice(startFrame, endFrame);
   }
 
   return mono;
