@@ -6,7 +6,8 @@
   "scripts": {
     "dev": "vite --host 127.0.0.1",
     "build": "tsc --noEmit && vite build",
-    "release:zip": "npm run build && powershell -NoProfile -ExecutionPolicy Bypass -File scripts/package-extension.ps1",
+    "build:hardened": "npm run build && node scripts/harden-build.mjs",
+    "release:zip": "npm run build:hardened && powershell -NoProfile -ExecutionPolicy Bypass -File scripts/package-extension.ps1",
     "preview": "vite preview --host 127.0.0.1",
     "license:promo": "node scripts/generate-license.mjs promo",
     "license:permanent": "node scripts/generate-license.mjs permanent"
@@ -24,6 +25,7 @@
     "@types/chrome": "^0.2.2",
     "@types/node": "^26.1.1",
     "@types/react": "^19.2.17",
-    "@types/react-dom": "^19.2.3"
+    "@types/react-dom": "^19.2.3",
+    "javascript-obfuscator": "^4.1.1"
   }
 }

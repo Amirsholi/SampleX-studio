@@ -1,0 +1,4 @@
+Abrir chrome://extensions.
+Activar “Modo desarrollador”.
+Pulsar “Cargar extensión descomprimida”.
+Seleccionar la carpeta SampleX resultante.
