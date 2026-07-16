@@ -67,6 +67,8 @@ button { color: inherit; }
 .datum { min-width: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 1px; white-space: nowrap; }
 .datum strong { font: 600 13px Bahnschrift,"Cascadia Mono",monospace; line-height: 1; overflow: hidden; text-overflow: ellipsis; }
 .datum small { color: #46535d; font-size: 7px; line-height: 1; font-weight: 700; letter-spacing: .16em; }
+.datum-inline { flex-direction:row; gap:4px; align-items:baseline; }
+.datum-inline small { letter-spacing:.08em; }
 .datum-bpm strong { color: var(--accent-bpm); text-shadow: 0 0 6px rgba(157,222,112,.13); }
 .datum-key strong { color: var(--accent-key); text-shadow: 0 0 6px rgba(185,161,247,.13); }
 .datum-hz strong { color: var(--accent-hz); text-shadow: 0 0 6px rgba(111,168,245,.13); }

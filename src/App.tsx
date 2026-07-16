@@ -542,7 +542,8 @@ function LicensePanel({ access, code, busy, message, onClose, onCode, onSubmit, 
 }
 
 function Datum({ value, label, loading }: { value: string; label: string; loading: boolean }) {
-  return <span className={`datum datum-${label.toLowerCase()}`}>{loading ? <i className="skeleton" /> : <strong>{value}</strong>}<small>{label}</small></span>;
+  const inlineUnit = label === "BPM" || label === "HZ";
+  return <span className={`datum datum-${label.toLowerCase()}${inlineUnit ? " datum-inline" : ""}`}>{loading ? <i className="skeleton" /> : <strong>{value}</strong>}<small>{label}</small></span>;
 }
 function hasChrome() { return typeof chrome !== "undefined" && Boolean(chrome.runtime?.id); }
 function errorMessage(error: unknown) { return error instanceof Error ? error.message : String(error); }

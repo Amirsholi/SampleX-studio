@@ -19,6 +19,22 @@ describe("audio analysis baseline", () => {
     expect(result.bpm).toBeLessThanOrEqual(122);
   });
 
+  it("recognizes a steady 95 BPM groove", () => {
+    const duration = 12;
+    const signal = new Float32Array(SAMPLE_RATE * duration);
+    const beatInterval = SAMPLE_RATE * 60 / 95;
+    for (let beat = 0; beat < signal.length; beat += beatInterval) {
+      const start = Math.round(beat);
+      for (let sample = 0; sample < 700 && start + sample < signal.length; sample += 1) {
+        signal[start + sample] += Math.exp(-sample / 90) * Math.sin(2 * Math.PI * 110 * sample / SAMPLE_RATE);
+      }
+    }
+
+    const result = analyzePcm([signal], SAMPLE_RATE, { start: 0, end: duration });
+    expect(result.bpm).toBeGreaterThanOrEqual(93);
+    expect(result.bpm).toBeLessThanOrEqual(97);
+  });
+
   it("recognizes a monophonic A4 tone", () => {
     const duration = 1.5;
     const signal = Float32Array.from(

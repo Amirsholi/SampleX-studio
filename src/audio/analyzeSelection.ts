@@ -1,5 +1,4 @@
 import type { AnalysisResult, SelectionRange } from "../types";
-import { magnitudeSpectrum } from "./spectrum";
 
 const NOTE_NAMES = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"];
 const MAJOR_PROFILE = [6.35, 2.23, 3.48, 2.33, 4.38, 4.09, 2.52, 5.19, 2.39, 3.66, 2.29, 2.88];
@@ -86,55 +85,42 @@ function detectChannels(channelData: Float32Array[], sampleRate: number, range: 
 }
 
 function estimateBpm(samples: Float32Array, sampleRate: number) {
-  const targetRate = 22_050;
-  const reduced = downsample(samples, sampleRate, targetRate);
-  const analysisRate = sampleRate / Math.max(1, Math.round(sampleRate / targetRate));
   const frameSize = 1024;
-  const hopSize = 256;
-  const novelty: number[] = [];
-  let previous = new Float64Array(frameSize / 2 + 1);
+  const hopSize = 512;
+  const energies: number[] = [];
 
-  for (let offset = 0; offset + frameSize <= reduced.length; offset += hopSize) {
-    const spectrum = magnitudeSpectrum(reduced.subarray(offset, offset + frameSize), frameSize);
-    let flux = 0;
-    const highestBin = Math.min(spectrum.length - 1, Math.floor(8_000 * frameSize / analysisRate));
-    for (let bin = 2; bin <= highestBin; bin += 1) {
-      const value = Math.log1p(spectrum[bin]);
-      const delta = value - previous[bin];
-      if (delta > 0) flux += delta * (0.7 + bin / highestBin * 0.3);
-      previous[bin] = value;
+  for (let offset = 0; offset + frameSize < samples.length; offset += hopSize) {
+    let energy = 0;
+    for (let index = 0; index < frameSize; index += 1) {
+      const value = samples[offset + index];
+      energy += value * value;
     }
-    novelty.push(flux);
+    energies.push(Math.sqrt(energy / frameSize));
   }
 
-  if (novelty.length < 16) {
+  if (energies.length < 8) {
     return { bpm: null, confidence: 0 };
   }
 
-  const centered = novelty.map((value, index) => {
-    const from = Math.max(0, index - 8);
-    const to = Math.min(novelty.length, index + 9);
-    let localMean = 0;
-    for (let cursor = from; cursor < to; cursor += 1) localMean += novelty[cursor];
-    return Math.max(0, value - localMean / (to - from));
-  });
-  const framesPerSecond = analysisRate / hopSize;
+  const novelty = energies.map((energy, index) => Math.max(0, energy - (energies[index - 1] ?? energy)));
+  const mean = novelty.reduce((sum, value) => sum + value, 0) / novelty.length;
+  const centered = novelty.map((value) => Math.max(0, value - mean * 0.8));
+  const framesPerSecond = sampleRate / hopSize;
   let bestBpm = 0;
   let bestScore = 0;
-  let secondScore = 0;
+  let totalScore = 0;
 
-  for (let bpm = 55; bpm <= 205; bpm += 1) {
-    const lag = (60 / bpm) * framesPerSecond;
-    const harmonicScore = periodicityScore(centered, lag)
-      + periodicityScore(centered, lag / 2) * 0.2;
-    const tempoPrior = 1 + 0.16 * Math.exp(-Math.pow((bpm - 120) / 48, 2));
-    const score = harmonicScore * tempoPrior;
+  for (let bpm = 60; bpm <= 190; bpm += 1) {
+    const lag = Math.round((60 / bpm) * framesPerSecond);
+    if (lag <= 1 || lag >= centered.length) continue;
+    let score = 0;
+    for (let index = lag; index < centered.length; index += 1) {
+      score += centered[index] * centered[index - lag];
+    }
+    totalScore += score;
     if (score > bestScore) {
-      secondScore = bestScore;
       bestScore = score;
       bestBpm = bpm;
-    } else if (Math.abs(bpm - bestBpm) > 4 && score > secondScore) {
-      secondScore = score;
     }
   }
 
@@ -143,15 +129,9 @@ function estimateBpm(samples: Float32Array, sampleRate: number) {
     return { bpm: fallback, confidence: fallback ? 0.25 : 0 };
   }
 
-  const peakBpm = estimateBpmFromPeaks(centered, framesPerSecond);
-  if (peakBpm) {
-    const ratio = Math.max(peakBpm, bestBpm) / Math.min(peakBpm, bestBpm);
-    if (ratio > 1.9 && ratio < 2.1 && peakBpm >= 85 && peakBpm <= 170) bestBpm = peakBpm;
-  }
-
   return {
     bpm: bestBpm,
-    confidence: Math.max(0, Math.min(1, (bestScore - secondScore) / Math.max(bestScore, 1e-9) * 3)),
+    confidence: Math.min(1, bestScore / Math.max(bestScore, totalScore / 16)),
   };
 }
 
@@ -179,7 +159,7 @@ function estimateBpmFromPeaks(novelty: number[], framesPerSecond: number) {
 function estimatePitchAndKey(samples: Float32Array, sampleRate: number) {
   const windowSize = 4096;
   const hopSize = 2048;
-  const chroma = buildSpectralChroma(samples, sampleRate);
+  const chroma = new Array<number>(12).fill(0);
   const pitches: number[] = [];
 
   for (let offset = 0; offset + windowSize < samples.length; offset += hopSize) {
@@ -195,6 +175,9 @@ function estimatePitchAndKey(samples: Float32Array, sampleRate: number) {
     }
 
     pitches.push(frequency);
+    const midi = 69 + 12 * Math.log2(frequency / 440);
+    const pitchClass = mod(Math.round(midi), 12);
+    chroma[pitchClass] += rms;
   }
 
   if (pitches.length === 0) {
@@ -209,35 +192,6 @@ function estimatePitchAndKey(samples: Float32Array, sampleRate: number) {
     key: keyResult.key,
     confidence: keyResult.confidence,
   };
-}
-
-function buildSpectralChroma(samples: Float32Array, sampleRate: number) {
-  const frameSize = 4096;
-  const hopSize = 2048;
-  const chroma = new Array<number>(12).fill(0);
-  const frameLimit = 320;
-  const availableFrames = Math.max(1, Math.floor((samples.length - frameSize) / hopSize) + 1);
-  const frameStride = Math.max(1, Math.ceil(availableFrames / frameLimit));
-
-  for (let frameIndex = 0; frameIndex < availableFrames; frameIndex += frameStride) {
-    const offset = frameIndex * hopSize;
-    if (offset + frameSize > samples.length) break;
-    const spectrum = magnitudeSpectrum(samples.subarray(offset, offset + frameSize), frameSize);
-    const minimumBin = Math.max(2, Math.ceil(55 * frameSize / sampleRate));
-    const maximumBin = Math.min(spectrum.length - 2, Math.floor(5_000 * frameSize / sampleRate));
-    for (let bin = minimumBin; bin <= maximumBin; bin += 1) {
-      const magnitude = spectrum[bin];
-      if (magnitude <= spectrum[bin - 1] || magnitude < spectrum[bin + 1]) continue;
-      const frequency = bin * sampleRate / frameSize;
-      const midi = 69 + 12 * Math.log2(frequency / 440);
-      const nearest = Math.round(midi);
-      const distance = Math.abs(midi - nearest);
-      const pitchClass = mod(nearest, 12);
-      const tuningWeight = Math.max(0, 1 - distance * 2);
-      chroma[pitchClass] += Math.sqrt(magnitude) * tuningWeight / Math.sqrt(frequency);
-    }
-  }
-  return chroma;
 }
 
 function estimateFundamental(frame: Float32Array, sampleRate: number) {
@@ -332,47 +286,8 @@ function rotateProfile(profile: number[], tonic: number) {
 }
 
 function profileScore(chroma: number[], profile: number[]) {
-  const chromaMean = chroma.reduce((sum, value) => sum + value, 0) / chroma.length;
-  const profileMean = profile.reduce((sum, value) => sum + value, 0) / profile.length;
-  let numerator = 0;
-  let chromaEnergy = 0;
-  let profileEnergy = 0;
-  for (let index = 0; index < chroma.length; index += 1) {
-    const chromaValue = chroma[index] - chromaMean;
-    const profileValue = profile[index] - profileMean;
-    numerator += chromaValue * profileValue;
-    chromaEnergy += chromaValue * chromaValue;
-    profileEnergy += profileValue * profileValue;
-  }
-  return numerator / Math.sqrt(chromaEnergy * profileEnergy || 1);
-}
-
-function downsample(samples: Float32Array, sampleRate: number, targetRate: number) {
-  const factor = Math.max(1, Math.round(sampleRate / targetRate));
-  if (factor === 1) return samples;
-  const output = new Float32Array(Math.floor(samples.length / factor));
-  for (let index = 0; index < output.length; index += 1) {
-    let sum = 0;
-    for (let offset = 0; offset < factor; offset += 1) sum += samples[index * factor + offset];
-    output[index] = sum / factor;
-  }
-  return output;
-}
-
-function periodicityScore(novelty: number[], lag: number) {
-  if (lag < 1 || lag >= novelty.length - 1) return 0;
-  const lower = Math.floor(lag);
-  const fraction = lag - lower;
-  let score = 0;
-  let energyA = 0;
-  let energyB = 0;
-  for (let index = lower + 1; index < novelty.length; index += 1) {
-    const delayed = novelty[index - lower] * (1 - fraction) + novelty[index - lower - 1] * fraction;
-    score += novelty[index] * delayed;
-    energyA += novelty[index] * novelty[index];
-    energyB += delayed * delayed;
-  }
-  return score / Math.sqrt(energyA * energyB || 1);
+  const profileTotal = profile.reduce((sum, value) => sum + value, 0);
+  return chroma.reduce((sum, value, index) => sum + value * (profile[index] / profileTotal), 0);
 }
 
 function median(values: number[]) {
