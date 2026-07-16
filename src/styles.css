@@ -14,10 +14,10 @@
   font-synthesis: none;
 }
 * { box-sizing: border-box; }
-html, body, #root { width: 600px; height: 286px; margin: 0; overflow: hidden; background:transparent; }
+html, body, #root { width: 100%; height: 286px; margin: 0; overflow: hidden; background:transparent; }
 button, input { font: inherit; }
 button { color: inherit; }
-.samplex { position:relative; width: 600px; height: 286px; display: grid; grid-template-rows: 28px 238px 20px; overflow:hidden; border-radius:10px; background: var(--panel); color: #e8edf2; border: 1px solid #34414b; box-shadow: inset 0 1px 0 rgba(219,235,244,.16), inset 1px 0 0 rgba(132,155,170,.06), inset 0 -2px 5px rgba(0,0,0,.52), 0 8px 28px rgba(0,0,0,.42); }
+.samplex { position:relative; width: 100%; max-width:600px; height: 286px; display: grid; grid-template-rows: 28px 238px 20px; overflow:hidden; border-radius:10px; background: var(--panel); color: #e8edf2; border: 1px solid #34414b; box-shadow: inset 0 1px 0 rgba(219,235,244,.16), inset 1px 0 0 rgba(132,155,170,.06), inset 0 -2px 5px rgba(0,0,0,.52), 0 8px 28px rgba(0,0,0,.42); }
 .sample-header { position: relative; display: flex; align-items: center; padding: 0 15px; background: var(--panel); }
 .brand { color: #eef5f8; font-family: Bahnschrift,"Segoe UI Variable",sans-serif; font-size: 10px; letter-spacing: .2em; font-weight: 600; }
 .license-controls { margin-left:auto; display:flex; align-items:center; }
@@ -107,6 +107,31 @@ footer { display:flex; align-items:flex-start; justify-content:flex-end; padding
 .license-panel .activation-card>svg { display:none; }
 .restore-button { height:23px; display:flex; align-items:center; gap:6px; margin-top:2px; padding:0 9px; color:#708993; border-color:transparent; background:transparent; }
 .restore-button:not(:disabled):hover { color:#bcecf5; }
+@media (max-width: 520px) {
+  .instrument-stage { grid-template-columns:56px minmax(0,1fr); padding-inline:5px; }
+  .control-face { width:46px; height:46px; }
+  .file-row { gap:5px; }
+  .delete-action { width:27px; padding:0; }
+  .delete-action span { display:none; }
+  .restart-action,.play-action,.wav-action { width:44px; }
+  .restart-action { left:calc(56px + (100% - 61px) * .2 - 22px); }
+  .play-action { left:calc(56px + (100% - 61px) * .5 - 22px); }
+  .wav-action { left:calc(56px + (100% - 61px) * .8 - 22px); }
+  .license-panel { width:calc(100% - 24px); }
+}
+@media (max-width: 360px) {
+  .sample-header { padding-inline:10px; }
+  .instrument-stage { grid-template-columns:48px minmax(0,1fr); padding-inline:3px; }
+  .control-face { width:40px; height:40px; }
+  .rec-stack { gap:5px; }
+  .datum strong { font-size:11px; }
+  .datum small { font-size:6px; }
+  .restart-action { left:calc(48px + (100% - 51px) * .18 - 20px); }
+  .play-action { left:calc(48px + (100% - 51px) * .5 - 20px); }
+  .wav-action { left:calc(48px + (100% - 51px) * .82 - 20px); }
+  .restart-action,.play-action,.wav-action { width:40px; }
+  .activation-card form { grid-template-columns:1fr; }
+}
 @keyframes record-pulse { 50% { opacity: .78; } }
 @keyframes skeleton-pulse { 50% { opacity: .32; } }
 @keyframes waveform-arrive { from { opacity: .35; } to { opacity: 1; } }

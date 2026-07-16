@@ -6,10 +6,12 @@ chrome.runtime.onInstalled.addListener(() => void initializeState());
 
 chrome.action.onClicked.addListener((tab) => {
   if (!tab.id) return;
-  void chrome.scripting.executeScript({ target: { tabId: tab.id }, files: ["assets/panelHost.js"] }).catch((error: unknown) => {
-    const message = error instanceof Error ? error.message : String(error);
-    void setState({ status: "error", error: friendlyCaptureError(message) });
-  });
+  void chrome.scripting.executeScript({ target: { tabId: tab.id }, files: ["assets/panelHost.js"] })
+    .then(() => clearStalePageError())
+    .catch((error: unknown) => {
+      const message = error instanceof Error ? error.message : String(error);
+      void setState({ status: "error", error: friendlyCaptureError(message) });
+    });
 });
 
 chrome.runtime.onMessage.addListener((message: ExtensionMessage, _sender, sendResponse) => {
@@ -77,6 +79,13 @@ async function setState(state: ExtensionState) {
   await chrome.storage.local.set({ recordingState: state });
 }
 
+async function clearStalePageError() {
+  const current = await getState();
+  if (current.status === "error" && current.error === PROTECTED_PAGE_ERROR) {
+    await setState(DEFAULT_STATE);
+  }
+}
+
 async function initializeState() {
   const stored = await chrome.storage.local.get("recordingState");
   if (!stored.recordingState) await setState(DEFAULT_STATE);
@@ -84,7 +93,9 @@ async function initializeState() {
 
 function friendlyCaptureError(message: string) {
   if (/cannot access|chrome:\/\/|edge:\/\/|web store/i.test(message)) {
-    return "SampleX cannot run on this protected browser page. Open a regular website and try again.";
+    return PROTECTED_PAGE_ERROR;
   }
   return message;
 }
+
+const PROTECTED_PAGE_ERROR = "SampleX cannot run on this protected browser page. Open a regular website and try again.";
