@@ -6,7 +6,7 @@ import { decodeAudioBlob } from "./audio/decodeAudio";
 import { exportSelectionAsWav } from "./audio/exportWav";
 import { deleteLatestRecording, getLatestRecording } from "./audio/recordingStore";
 import type { ExtensionMessage, ExtensionState } from "./extension/messages";
-import type { AnalysisResult, SelectionRange } from "./types";
+import type { AnalysisResult, AnalysisWorkerRequest, AnalysisWorkerResponse, SelectionRange } from "./types";
 import { activateLicense, consumeExport, FREE_EXPORTS, getAccessState, LICENSE_URL, restoreLicense, shortLicenseId, type AccessState } from "./license/license";
 
 const EMPTY_RANGE = { start: 0, end: 0 };
@@ -28,6 +28,8 @@ export default function App() {
   const buffer = useRef<AudioBuffer | null>(null);
   const worker = useRef<Worker | null>(null);
   const analysisTimer = useRef<number | null>(null);
+  const analysisRequestId = useRef(0);
+  const latestAnalysisRequestId = useRef(0);
   const objectUrl = useRef<string | null>(null);
   const liveBars = useRef<number[]>([]);
   const activeRange = useRef<SelectionRange>(EMPTY_RANGE);
@@ -59,8 +61,9 @@ export default function App() {
 
   useEffect(() => {
     worker.current = new Worker(new URL("./audio/analysis.worker.ts", import.meta.url), { type: "module" });
-    worker.current.onmessage = (event: MessageEvent<AnalysisResult>) => {
-      setAnalysis(event.data);
+    worker.current.onmessage = (event: MessageEvent<AnalysisWorkerResponse>) => {
+      if (event.data.requestId !== latestAnalysisRequestId.current) return;
+      setAnalysis(event.data.result);
       setAnalyzing(false);
     };
     if (hasChrome()) {
@@ -124,6 +127,7 @@ export default function App() {
     const url = URL.createObjectURL(stored.blob);
     objectUrl.current = url;
     buffer.current = decoded;
+    loadAudioIntoAnalysisWorker(decoded);
     recordingCreatedAt.current = stored.createdAt;
     const saved = hasChrome() ? (await chrome.storage.local.get(SESSION_KEY))[SESSION_KEY] as EditingSession | undefined : undefined;
     const restored = saved?.recordingCreatedAt === stored.createdAt ? saved : undefined;
@@ -225,6 +229,7 @@ export default function App() {
     region.current = null;
     recordingCreatedAt.current = null;
     buffer.current = null;
+    worker.current?.postMessage({ type: "CLEAR_AUDIO" } satisfies AnalysisWorkerRequest);
     if (objectUrl.current) URL.revokeObjectURL(objectUrl.current);
     objectUrl.current = null;
     setRange(EMPTY_RANGE);
@@ -244,13 +249,25 @@ export default function App() {
 
   function scheduleAnalysis(next: SelectionRange) {
     if (analysisTimer.current) window.clearTimeout(analysisTimer.current);
+    const requestId = ++analysisRequestId.current;
+    latestAnalysisRequestId.current = requestId;
     setAnalyzing(true);
     analysisTimer.current = window.setTimeout(() => {
-      const audio = buffer.current;
-      if (!audio || !worker.current) return;
-      const channels = Array.from({ length: audio.numberOfChannels }, (_, index) => audio.getChannelData(index).slice());
-      worker.current.postMessage({ channels, sampleRate: audio.sampleRate, range: next }, channels.map((channel) => channel.buffer));
+      if (!buffer.current || !worker.current) return;
+      worker.current.postMessage({ type: "ANALYZE", requestId, range: next } satisfies AnalysisWorkerRequest);
     }, 350);
+  }
+
+  function loadAudioIntoAnalysisWorker(audio: AudioBuffer) {
+    if (!worker.current) return;
+    const channels = Array.from(
+      { length: audio.numberOfChannels },
+      (_, index) => audio.getChannelData(index).slice(),
+    );
+    worker.current.postMessage(
+      { type: "LOAD_AUDIO", channels, sampleRate: audio.sampleRate } satisfies AnalysisWorkerRequest,
+      channels.map((channel) => channel.buffer),
+    );
   }
 
   async function download(accessOverride?: AccessState) {

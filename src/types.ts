@@ -23,3 +23,13 @@ export interface AnalysisResult {
   duration: number;
   channels: "Mono" | "Stereo";
 }
+
+export type AnalysisWorkerRequest =
+  | { type: "LOAD_AUDIO"; channels: Float32Array[]; sampleRate: number }
+  | { type: "ANALYZE"; requestId: number; range: SelectionRange }
+  | { type: "CLEAR_AUDIO" };
+
+export interface AnalysisWorkerResponse {
+  requestId: number;
+  result: AnalysisResult;
+}

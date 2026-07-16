@@ -192,8 +192,8 @@ function estimateFundamental(frame: Float32Array, sampleRate: number) {
   const maxFrequency = 1800;
   const minLag = Math.floor(sampleRate / maxFrequency);
   const maxLag = Math.min(Math.floor(sampleRate / minFrequency), frame.length - 1);
-  let bestLag = 0;
   let bestCorrelation = 0;
+  const correlations = new Float32Array(maxLag + 1);
 
   for (let lag = minLag; lag <= maxLag; lag += 1) {
     let correlation = 0;
@@ -208,17 +208,33 @@ function estimateFundamental(frame: Float32Array, sampleRate: number) {
     }
 
     const normalized = correlation / Math.sqrt(normA * normB || 1);
+    correlations[lag] = normalized;
     if (normalized > bestCorrelation) {
       bestCorrelation = normalized;
-      bestLag = lag;
     }
   }
 
-  if (!bestLag || bestCorrelation < 0.35) {
+  if (bestCorrelation < 0.35) {
     return null;
   }
 
-  return sampleRate / bestLag;
+  const threshold = Math.max(0.35, bestCorrelation * 0.9);
+  let selectedLag = 0;
+  for (let lag = minLag + 1; lag < maxLag; lag += 1) {
+    const current = correlations[lag];
+    if (current >= threshold && current >= correlations[lag - 1] && current > correlations[lag + 1]) {
+      selectedLag = lag;
+      break;
+    }
+  }
+  if (!selectedLag) return null;
+
+  const before = correlations[selectedLag - 1];
+  const center = correlations[selectedLag];
+  const after = correlations[selectedLag + 1];
+  const denominator = before - 2 * center + after;
+  const offset = Math.abs(denominator) > 1e-9 ? 0.5 * (before - after) / denominator : 0;
+  return sampleRate / (selectedLag + Math.max(-0.5, Math.min(0.5, offset)));
 }
 
 function estimateKeyFromChroma(chroma: number[]) {
