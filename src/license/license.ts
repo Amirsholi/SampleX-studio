@@ -1,9 +1,8 @@
 ﻿export const FREE_EXPORTS = 75;
-export const LICENSE_URL = "https://amirsholi.vercel.app/#buy-samplex";
+export const LICENSE_URL = "https://amirsholi.vercel.app/samplex";
 
 const CREDIT_KEY = "samplexExportCredits";
 const LICENSE_KEY = "samplexLicense";
-const REDEEMED_KEY = "samplexRedeemedLicenses";
 
 const PUBLIC_KEY: JsonWebKey = {
   kty: "EC",
@@ -17,9 +16,8 @@ export interface LicensePayload {
   version: 1;
   id: string;
   product: "samplex";
-  kind: "permanent" | "promo" | "credits";
+  kind: "permanent" | "promo";
   issuedAt: string;
-  credits?: number;
   expiresAt?: string;
   note?: string;
 }
@@ -59,26 +57,14 @@ export async function activateLicense(rawToken: string): Promise<AccessState> {
   const token = rawToken.trim();
   const payload = await verifyLicense(token);
   if (payload.expiresAt && Date.parse(payload.expiresAt) <= Date.now()) throw new Error("This license has expired.");
+  if (!isPermanent(payload)) throw new Error("This license does not unlock SampleX.");
 
   if (!hasChromeStorage()) {
-    return { credits: payload.credits ?? FREE_EXPORTS, unlocked: isPermanent(payload), licenseId: payload.id, licenseKind: payload.kind };
+    return { credits: FREE_EXPORTS, unlocked: true, licenseId: payload.id, licenseKind: payload.kind };
   }
 
-  if (isPermanent(payload)) {
-    await chrome.storage.sync.set({ [LICENSE_KEY]: token });
-    return getAccessState();
-  }
-
-  const synced = await chrome.storage.sync.get(REDEEMED_KEY);
-  const redeemed = Array.isArray(synced[REDEEMED_KEY]) ? synced[REDEEMED_KEY] as string[] : [];
-  if (redeemed.includes(payload.id)) throw new Error("This credit code has already been redeemed.");
-  const current = await getAccessState();
-  const credits = current.credits + (payload.credits ?? 0);
-  await Promise.all([
-    chrome.storage.local.set({ [CREDIT_KEY]: credits }),
-    chrome.storage.sync.set({ [REDEEMED_KEY]: [...redeemed, payload.id].slice(-100) }),
-  ]);
-  return { ...current, credits };
+  await chrome.storage.sync.set({ [LICENSE_KEY]: token });
+  return getAccessState();
 }
 
 export async function restoreLicense() {
@@ -100,8 +86,7 @@ async function verifyLicense(token: string): Promise<LicensePayload> {
   const valid = await crypto.subtle.verify({ name: "ECDSA", hash: "SHA-256" }, key, signature, payloadBytes);
   if (!valid) throw new Error("The license signature is not valid.");
   const payload = JSON.parse(new TextDecoder().decode(payloadBytes)) as LicensePayload;
-  if (payload.version !== 1 || payload.product !== "samplex" || !payload.id) throw new Error("This license is not valid for SampleX.");
-  if (payload.kind === "credits" && (!Number.isInteger(payload.credits) || payload.credits! <= 0)) throw new Error("This credit license is invalid.");
+  if (payload.version !== 1 || payload.product !== "samplex" || !payload.id || !isPermanent(payload)) throw new Error("This license is not valid for SampleX.");
   return payload;
 }
 

@@ -9,13 +9,12 @@ Never copy `license-private.pem` into the project, a deployment, chat, email, or
 ```powershell
 npm.cmd run license:promo
 npm.cmd run license:permanent
-npm.cmd run license:credits -- 500
 ```
 
-Each command prints the license code and appends its complete record to `C:\Users\Usuario\.samplex\license-registry.jsonl`. A promo license and a permanent license both unlock SampleX indefinitely. A credit license adds the requested number of exports and can only be redeemed once per synchronized Chrome profile.
+Each command prints the license code and appends its complete record to `C:\Users\Usuario\.samplex\license-registry.jsonl`. A promo license and a permanent license both unlock SampleX indefinitely. Permanent licenses are the only paid license type; promo licenses are reserved for private testers and support.
 
 ## Recovery
 
 Search `license-registry.jsonl` by license ID, creation date, or token. The final four characters of the ID are displayed in SampleX as `SX-XXXX`.
 
-The commercial backend should use the same P-256 signing format and store licenses in a database. Never deploy the private key to the frontend or include it in the extension package.
+The commercial backend uses the same P-256 signing format and stores licenses in Supabase after Polar confirms payment. Never deploy the private key to the frontend or include it in the extension package. License recovery is handled manually through support and the private portfolio administrator.

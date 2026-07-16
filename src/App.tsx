@@ -47,6 +47,7 @@ export default function App() {
   const [licenseCode, setLicenseCode] = useState("");
   const [licenseBusy, setLicenseBusy] = useState(false);
   const [licenseMessage, setLicenseMessage] = useState<string | null>(null);
+  const [pendingExport, setPendingExport] = useState(false);
 
   const recording = extensionState.status === "recording";
   const showingCapture = recording || extensionState.status === "stopping";
@@ -252,15 +253,17 @@ export default function App() {
     }, 350);
   }
 
-  async function download() {
+  async function download(accessOverride?: AccessState) {
     if (!buffer.current || range.end <= range.start) return;
-    if (!access.unlocked && access.credits <= 0) {
+    const currentAccess = accessOverride ?? access;
+    if (!currentAccess.unlocked && currentAccess.credits <= 0) {
+      setPendingExport(true);
       setLicenseOpen(true);
       return;
     }
     try {
       const wav = exportSelectionAsWav(buffer.current, range);
-      const nextAccess = await consumeExport();
+      const nextAccess = currentAccess.unlocked ? currentAccess : await consumeExport();
       const url = URL.createObjectURL(wav);
       const anchor = document.createElement("a");
       anchor.href = url;
@@ -282,7 +285,12 @@ export default function App() {
       const next = await activateLicense(licenseCode);
       setAccess(next);
       setLicenseCode("");
-      setLicenseMessage(next.unlocked ? "SampleX is permanently unlocked." : `${next.credits} exports available.`);
+      setLicenseMessage("SampleX is permanently unlocked.");
+      if (pendingExport) {
+        setPendingExport(false);
+        setLicenseOpen(false);
+        await download(next);
+      }
     } catch (error) {
       setLicenseMessage(errorMessage(error));
     } finally {
@@ -300,6 +308,11 @@ export default function App() {
     } finally {
       setLicenseBusy(false);
     }
+  }
+
+  function closeLicense() {
+    setLicenseOpen(false);
+    setPendingExport(false);
   }
 
   function togglePlayback() {
@@ -467,17 +480,8 @@ export default function App() {
         <button className="wav-action" onClick={() => void download()} disabled={!hasAudio || loading} aria-label="Download WAV" title="Download WAV"><Download size={17} /></button>
       </footer>
 
-      {!access.unlocked && access.credits <= 0 && (
-        <div className="license-lock" role="dialog" aria-modal="true" aria-label="SampleX activation required">
-          <ActivationForm code={licenseCode} busy={licenseBusy} message={licenseMessage} onCode={setLicenseCode} onSubmit={submitLicense} />
-        </div>
-      )}
-
-      {licenseOpen && access.credits > 0 && !access.unlocked && (
-        <LicensePanel access={access} code={licenseCode} busy={licenseBusy} message={licenseMessage} onClose={() => setLicenseOpen(false)} onCode={setLicenseCode} onSubmit={submitLicense} onRestore={handleRestore} />
-      )}
-      {licenseOpen && access.unlocked && (
-        <LicensePanel access={access} code={licenseCode} busy={licenseBusy} message={licenseMessage} onClose={() => setLicenseOpen(false)} onCode={setLicenseCode} onSubmit={submitLicense} onRestore={handleRestore} />
+      {licenseOpen && (
+        <LicensePanel access={access} code={licenseCode} busy={licenseBusy} message={licenseMessage} onClose={closeLicense} onCode={setLicenseCode} onSubmit={submitLicense} onRestore={handleRestore} />
       )}
     </main>
   );

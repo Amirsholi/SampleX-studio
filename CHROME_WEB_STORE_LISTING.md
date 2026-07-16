@@ -23,7 +23,7 @@ Features:
 - Local BPM, key and frequency analysis
 - WAV export
 - 75 free exports
-- Optional 500-export packs and a lifetime unlock
+- Optional one-time lifetime unlock
 - Signed offline license activation
 
 SampleX is intended for audio you own, created, licensed, or have permission to record. You are responsible for respecting copyright, website terms and applicable law.
@@ -32,7 +32,7 @@ Audio processing happens locally in the browser. See the privacy policy for comp
 
 ## Public URLs
 
-- Homepage: `https://amirsholi.vercel.app/#samplex`
+- Homepage: `https://amirsholi.vercel.app/samplex`
 - Privacy policy: `https://amirsholi.vercel.app/samplex/privacy`
 - Terms: `https://amirsholi.vercel.app/samplex/terms`
 - Refund policy: `https://amirsholi.vercel.app/samplex/refunds`
