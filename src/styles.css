@@ -89,6 +89,7 @@ button:disabled { opacity: .2; cursor: default; }
 footer { display:flex; align-items:flex-start; justify-content:flex-end; padding:0 18px; background:var(--panel); }
 .wav-action { position:absolute; z-index:8; left:390px; bottom:12px; display:grid; place-items:center; width:48px; height:32px; padding:0; color:#8798a2; background:#171e25; border:1px solid rgba(128,151,164,.16); border-radius:16px; box-shadow:inset 0 1px 0 rgba(225,238,244,.055); }
 .wav-action:not(:disabled):hover { color: #48c6e2; }
+.wav-action.exporting svg { animation:export-spin .8s linear infinite; }
 .license-lock { position:absolute; z-index:20; inset:28px 0 0; display:grid; place-items:center; background:rgba(7,11,15,.48); backdrop-filter:blur(8px) saturate(.65); -webkit-backdrop-filter:blur(8px) saturate(.65); animation:lock-arrive .25s ease-out; }
 .activation-card { width:min(330px,calc(100% - 44px)); display:grid; justify-items:center; gap:8px; color:#8bddef; }
 .activation-card>svg { filter:drop-shadow(0 0 7px rgba(86,211,237,.4)); }
@@ -137,4 +138,5 @@ footer { display:flex; align-items:flex-start; justify-content:flex-end; padding
 @keyframes record-pulse { 50% { opacity: .78; } }
 @keyframes skeleton-pulse { 50% { opacity: .32; } }
 @keyframes waveform-arrive { from { opacity: .35; } to { opacity: 1; } }
+@keyframes export-spin { to { transform:rotate(360deg); } }
 @keyframes lock-arrive { from { opacity:0; backdrop-filter:blur(0); } to { opacity:1; backdrop-filter:blur(8px); } }

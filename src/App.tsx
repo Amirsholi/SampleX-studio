@@ -1,9 +1,8 @@
 import { useEffect, useRef, useState } from "react";
 import WaveSurfer from "wavesurfer.js";
 import RegionsPlugin, { type Region } from "wavesurfer.js/dist/plugins/regions.esm.js";
-import { Circle, Download, KeyRound, Pause, Pencil, Play, RotateCcw, SkipBack, Square, Trash2, X } from "lucide-react";
+import { Circle, Download, KeyRound, LoaderCircle, Pause, Pencil, Play, RotateCcw, SkipBack, Square, Trash2, X } from "lucide-react";
 import { decodeAudioBlob } from "./audio/decodeAudio";
-import { exportSelectionAsWav } from "./audio/exportWav";
 import { deleteLatestRecording, getLatestRecording } from "./audio/recordingStore";
 import type { ExtensionMessage, ExtensionState } from "./extension/messages";
 import type { AnalysisResult, AnalysisWorkerRequest, AnalysisWorkerResponse, SelectionRange } from "./types";
@@ -30,6 +29,8 @@ export default function App() {
   const analysisTimer = useRef<number | null>(null);
   const analysisRequestId = useRef(0);
   const latestAnalysisRequestId = useRef(0);
+  const exportRequestId = useRef(0);
+  const pendingExportRequest = useRef<{ requestId: number; resolve: (wav: ArrayBuffer) => void; reject: (error: Error) => void } | null>(null);
   const objectUrl = useRef<string | null>(null);
   const liveBars = useRef<number[]>([]);
   const activeRange = useRef<SelectionRange>(EMPTY_RANGE);
@@ -50,6 +51,7 @@ export default function App() {
   const [licenseBusy, setLicenseBusy] = useState(false);
   const [licenseMessage, setLicenseMessage] = useState<string | null>(null);
   const [pendingExport, setPendingExport] = useState(false);
+  const [exporting, setExporting] = useState(false);
 
   const recording = extensionState.status === "recording";
   const showingCapture = recording || extensionState.status === "stopping";
@@ -62,9 +64,17 @@ export default function App() {
   useEffect(() => {
     worker.current = new Worker(new URL("./audio/analysis.worker.ts", import.meta.url), { type: "module" });
     worker.current.onmessage = (event: MessageEvent<AnalysisWorkerResponse>) => {
-      if (event.data.requestId !== latestAnalysisRequestId.current) return;
-      setAnalysis(event.data.result);
-      setAnalyzing(false);
+      if (event.data.type === "ANALYSIS_RESULT") {
+        if (event.data.requestId !== latestAnalysisRequestId.current) return;
+        setAnalysis(event.data.result);
+        setAnalyzing(false);
+        return;
+      }
+      const pending = pendingExportRequest.current;
+      if (!pending || pending.requestId !== event.data.requestId) return;
+      pendingExportRequest.current = null;
+      if (event.data.type === "EXPORT_RESULT") pending.resolve(event.data.wav);
+      else pending.reject(new Error(event.data.error));
     };
     if (hasChrome()) {
       void refreshState();
@@ -271,17 +281,18 @@ export default function App() {
   }
 
   async function download(accessOverride?: AccessState) {
-    if (!buffer.current || range.end <= range.start) return;
+    if (!buffer.current || range.end <= range.start || exporting) return;
     const currentAccess = accessOverride ?? access;
     if (!currentAccess.unlocked && currentAccess.credits <= 0) {
       setPendingExport(true);
       setLicenseOpen(true);
       return;
     }
+    setExporting(true);
     try {
-      const wav = exportSelectionAsWav(buffer.current, range);
+      const wav = await requestWavExport(range);
       const nextAccess = currentAccess.unlocked ? currentAccess : await consumeExport();
-      const url = URL.createObjectURL(wav);
+      const url = URL.createObjectURL(new Blob([wav], { type: "audio/wav" }));
       const anchor = document.createElement("a");
       anchor.href = url;
       anchor.download = buildDownloadName(sampleName, analysis);
@@ -290,7 +301,19 @@ export default function App() {
       window.setTimeout(() => URL.revokeObjectURL(url), 1000);
     } catch (error) {
       setUiError(errorMessage(error));
+    } finally {
+      setExporting(false);
     }
+  }
+
+  function requestWavExport(selection: SelectionRange) {
+    if (!worker.current) return Promise.reject(new Error("Audio worker is not available."));
+    if (pendingExportRequest.current) return Promise.reject(new Error("A WAV export is already in progress."));
+    const requestId = ++exportRequestId.current;
+    return new Promise<ArrayBuffer>((resolve, reject) => {
+      pendingExportRequest.current = { requestId, resolve, reject };
+      worker.current?.postMessage({ type: "EXPORT_WAV", requestId, range: selection } satisfies AnalysisWorkerRequest);
+    });
   }
 
   async function submitLicense(event: React.FormEvent) {
@@ -479,7 +502,7 @@ export default function App() {
 
           <section className="analysis-line">
             <Datum loading={loading} value={analysis?.bpm ? String(Math.round(analysis.bpm)) : "…"} label="BPM" />
-            <Datum loading={loading} value={analysis?.key ?? analysis?.note ?? "…"} label="KEY" />
+            <Datum loading={loading} value={analysis?.key ?? analysis?.note ?? "…"} label="KEY" hideLabel />
             <Datum loading={loading} value={analysis?.frequencyHz ? String(Math.round(analysis.frequencyHz)) : "…"} label="HZ" />
             <Datum loading={loading} value={formatTime(duration)} label="LENGTH" />
           </section>
@@ -494,7 +517,7 @@ export default function App() {
       </section>
 
       <footer>
-        <button className="wav-action" onClick={() => void download()} disabled={!hasAudio || extensionState.status === "stopping"} aria-label="Download WAV" title={analyzing ? "Download WAV while analysis continues" : "Download WAV"}><Download size={17} /></button>
+        <button className={`wav-action ${exporting ? "exporting" : ""}`} onClick={() => void download()} disabled={!hasAudio || extensionState.status === "stopping" || exporting} aria-label={exporting ? "Exporting WAV" : "Download WAV"} title={exporting ? "Exporting WAV" : analyzing ? "Download WAV while analysis continues" : "Download WAV"}>{exporting ? <LoaderCircle size={17} /> : <Download size={17} />}</button>
       </footer>
 
       {licenseOpen && (
@@ -541,9 +564,9 @@ function LicensePanel({ access, code, busy, message, onClose, onCode, onSubmit, 
   );
 }
 
-function Datum({ value, label, loading }: { value: string; label: string; loading: boolean }) {
+function Datum({ value, label, loading, hideLabel = false }: { value: string; label: string; loading: boolean; hideLabel?: boolean }) {
   const inlineUnit = label === "BPM" || label === "HZ";
-  return <span className={`datum datum-${label.toLowerCase()}${inlineUnit ? " datum-inline" : ""}`}>{loading ? <i className="skeleton" /> : <strong>{value}</strong>}<small>{label}</small></span>;
+  return <span className={`datum datum-${label.toLowerCase()}${inlineUnit ? " datum-inline" : ""}`}>{loading ? <i className="skeleton" /> : <strong>{value}</strong>}{!hideLabel && <small>{label}</small>}</span>;
 }
 function hasChrome() { return typeof chrome !== "undefined" && Boolean(chrome.runtime?.id); }
 function errorMessage(error: unknown) { return error instanceof Error ? error.message : String(error); }

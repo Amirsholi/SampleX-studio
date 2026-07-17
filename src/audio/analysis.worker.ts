@@ -1,4 +1,5 @@
 import { analyzePcm } from "./analyzeSelection";
+import { encodePcmSelectionAsWav } from "./exportWav";
 import type { AnalysisWorkerRequest, AnalysisWorkerResponse } from "../types";
 
 let channels: Float32Array[] | null = null;
@@ -17,9 +18,26 @@ self.onmessage = (event: MessageEvent<AnalysisWorkerRequest>) => {
   }
   if (!channels || !sampleRate) return;
 
-  const response: AnalysisWorkerResponse = {
-    requestId: event.data.requestId,
-    result: analyzePcm(channels, sampleRate, event.data.range),
-  };
-  self.postMessage(response);
+  if (event.data.type === "ANALYZE") {
+    const response: AnalysisWorkerResponse = {
+      type: "ANALYSIS_RESULT",
+      requestId: event.data.requestId,
+      result: analyzePcm(channels, sampleRate, event.data.range),
+    };
+    self.postMessage(response);
+    return;
+  }
+
+  try {
+    const wav = encodePcmSelectionAsWav(channels, sampleRate, event.data.range);
+    const response: AnalysisWorkerResponse = { type: "EXPORT_RESULT", requestId: event.data.requestId, wav };
+    self.postMessage(response, { transfer: [wav] });
+  } catch (error) {
+    const response: AnalysisWorkerResponse = {
+      type: "EXPORT_ERROR",
+      requestId: event.data.requestId,
+      error: error instanceof Error ? error.message : String(error),
+    };
+    self.postMessage(response);
+  }
 };

@@ -27,9 +27,10 @@ export interface AnalysisResult {
 export type AnalysisWorkerRequest =
   | { type: "LOAD_AUDIO"; channels: Float32Array[]; sampleRate: number }
   | { type: "ANALYZE"; requestId: number; range: SelectionRange }
+  | { type: "EXPORT_WAV"; requestId: number; range: SelectionRange }
   | { type: "CLEAR_AUDIO" };
 
-export interface AnalysisWorkerResponse {
-  requestId: number;
-  result: AnalysisResult;
-}
+export type AnalysisWorkerResponse =
+  | { type: "ANALYSIS_RESULT"; requestId: number; result: AnalysisResult }
+  | { type: "EXPORT_RESULT"; requestId: number; wav: ArrayBuffer }
+  | { type: "EXPORT_ERROR"; requestId: number; error: string };

@@ -46,6 +46,7 @@ describe("audio analysis baseline", () => {
     expect(result.frequencyHz).toBeGreaterThan(435);
     expect(result.frequencyHz).toBeLessThan(445);
     expect(result.note).toBe("A4");
+    expect(result.bpm).toBeNull();
   });
 
   it("builds tonal context from a polyphonic C major chord", () => {
@@ -75,6 +76,17 @@ describe("audio analysis baseline", () => {
     expect(result.frequencyHz).toBeGreaterThan(435);
     expect(result.frequencyHz).toBeLessThan(445);
     expect(result.channels).toBe("Stereo");
+  });
+
+  it("does not invent a tempo for non-periodic noise", () => {
+    let seed = 42;
+    const signal = Float32Array.from({ length: SAMPLE_RATE * 4 }, () => {
+      seed = (seed * 1_664_525 + 1_013_904_223) >>> 0;
+      return (seed / 0xffff_ffff * 2 - 1) * 0.25;
+    });
+
+    const result = analyzePcm([signal], SAMPLE_RATE, { start: 0, end: 4 });
+    expect(result.bpm).toBeNull();
   });
 
   it("rejects selections that are too short for meaningful analysis", () => {

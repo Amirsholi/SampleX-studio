@@ -85,67 +85,70 @@ function detectChannels(channelData: Float32Array[], sampleRate: number, range: 
 }
 
 function estimateBpm(samples: Float32Array, sampleRate: number) {
-  const frameSize = 1024;
-  const hopSize = 512;
-  const energies: number[] = [];
+  const targetRate = 11_025;
+  const reduced = downsample(samples, sampleRate, targetRate);
+  const analysisRate = sampleRate / Math.max(1, Math.round(sampleRate / targetRate));
+  const frameSize = 512;
+  const hopSize = 128;
+  const bands = splitFrequencyBands(reduced, analysisRate);
+  const bandEnergy = bands.map((band) => frameEnergy(band, frameSize, hopSize));
+  if ((bandEnergy[0]?.length ?? 0) < 12) return { bpm: null, confidence: 0 };
 
-  for (let offset = 0; offset + frameSize < samples.length; offset += hopSize) {
-    let energy = 0;
-    for (let index = 0; index < frameSize; index += 1) {
-      const value = samples[offset + index];
-      energy += value * value;
+  const novelty = bandEnergy[0].map((_, index) => {
+    let onset = 0;
+    for (const energy of bandEnergy) {
+      const current = Math.log1p((energy[index] ?? 0) * 1_000);
+      const previous = Math.log1p((energy[index - 1] ?? energy[index] ?? 0) * 1_000);
+      onset += Math.max(0, current - previous);
     }
-    energies.push(Math.sqrt(energy / frameSize));
-  }
+    return index < 3 ? 0 : onset;
+  });
+  if (Math.max(...novelty) < 0.025) return { bpm: null, confidence: 0 };
+  const centered = novelty.map((value, index) => {
+    const from = Math.max(0, index - 8);
+    const to = Math.min(novelty.length, index + 9);
+    let localMean = 0;
+    for (let cursor = from; cursor < to; cursor += 1) localMean += novelty[cursor];
+    return Math.max(0, value - localMean / Math.max(1, to - from));
+  });
+  const framesPerSecond = analysisRate / hopSize;
+  const peaks = findOnsetPeaks(centered, framesPerSecond);
+  if (peaks.length < 4) return { bpm: null, confidence: 0 };
 
-  if (energies.length < 8) {
-    return { bpm: null, confidence: 0 };
-  }
-
-  const novelty = energies.map((energy, index) => Math.max(0, energy - (energies[index - 1] ?? energy)));
-  const mean = novelty.reduce((sum, value) => sum + value, 0) / novelty.length;
-  const centered = novelty.map((value) => Math.max(0, value - mean * 0.8));
-  const framesPerSecond = sampleRate / hopSize;
   let bestBpm = 0;
   let bestScore = 0;
-  let totalScore = 0;
+  let secondScore = 0;
 
-  for (let bpm = 60; bpm <= 190; bpm += 1) {
-    const lag = Math.round((60 / bpm) * framesPerSecond);
-    if (lag <= 1 || lag >= centered.length) continue;
-    let score = 0;
-    for (let index = lag; index < centered.length; index += 1) {
-      score += centered[index] * centered[index - lag];
-    }
-    totalScore += score;
+  for (let bpm = 55; bpm <= 200; bpm += 1) {
+    const lag = (60 / bpm) * framesPerSecond;
+    const score = periodicityScore(centered, lag) + periodicityScore(centered, lag * 2) * 0.18;
     if (score > bestScore) {
+      secondScore = bestScore;
       bestScore = score;
       bestBpm = bpm;
+    } else if (Math.abs(bpm - bestBpm) > 4 && score > secondScore) {
+      secondScore = score;
     }
   }
 
-  if (!bestBpm || bestScore <= 0) {
-    const fallback = estimateBpmFromPeaks(centered, framesPerSecond);
-    return { bpm: fallback, confidence: fallback ? 0.25 : 0 };
+  if (!bestBpm || bestScore < 0.08) return { bpm: null, confidence: 0 };
+  const peakBpm = estimateBpmFromPeaks(centered, framesPerSecond);
+  if (!peakBpm) return { bpm: null, confidence: 0 };
+  if (Math.abs(peakBpm - bestBpm) <= 4) bestBpm = peakBpm;
+  else {
+    const ratio = Math.max(peakBpm, bestBpm) / Math.min(peakBpm, bestBpm);
+    if (ratio < 1.9 || ratio > 2.1) return { bpm: null, confidence: 0 };
+    bestBpm = peakBpm;
   }
 
   return {
     bpm: bestBpm,
-    confidence: Math.min(1, bestScore / Math.max(bestScore, totalScore / 16)),
+    confidence: Math.max(0, Math.min(1, bestScore * 0.7 + (bestScore - secondScore) * 1.8)),
   };
 }
 
 function estimateBpmFromPeaks(novelty: number[], framesPerSecond: number) {
-  const mean = novelty.reduce((sum, value) => sum + value, 0) / Math.max(1, novelty.length);
-  const variance = novelty.reduce((sum, value) => sum + (value - mean) ** 2, 0) / Math.max(1, novelty.length);
-  const threshold = mean + Math.sqrt(variance) * 0.55;
-  const peaks: number[] = [];
-  const minimumGap = Math.max(1, Math.floor(framesPerSecond * 0.18));
-  for (let index = 1; index < novelty.length - 1; index += 1) {
-    if (novelty[index] > threshold && novelty[index] >= novelty[index - 1] && novelty[index] > novelty[index + 1]) {
-      if (!peaks.length || index - peaks[peaks.length - 1] >= minimumGap) peaks.push(index);
-    }
-  }
+  const peaks = findOnsetPeaks(novelty, framesPerSecond);
   if (peaks.length < 4) return null;
   const tempos = peaks.slice(1).map((peak, index) => {
     let bpm = 60 * framesPerSecond / (peak - peaks[index]);
@@ -153,7 +156,80 @@ function estimateBpmFromPeaks(novelty: number[], framesPerSecond: number) {
     while (bpm > 180) bpm /= 2;
     return bpm;
   }).filter(Number.isFinite);
-  return tempos.length ? Math.round(median(tempos)) : null;
+  if (!tempos.length) return null;
+  const tempo = median(tempos);
+  const deviation = median(tempos.map((value) => Math.abs(value - tempo)));
+  return deviation <= tempo * 0.08 ? Math.round(tempo) : null;
+}
+
+function findOnsetPeaks(novelty: number[], framesPerSecond: number) {
+  const mean = novelty.reduce((sum, value) => sum + value, 0) / Math.max(1, novelty.length);
+  const variance = novelty.reduce((sum, value) => sum + (value - mean) ** 2, 0) / Math.max(1, novelty.length);
+  const threshold = mean + Math.sqrt(variance) * 0.5;
+  const minimumGap = Math.max(1, Math.floor(framesPerSecond * 0.16));
+  const peaks: number[] = [];
+  for (let index = 1; index < novelty.length - 1; index += 1) {
+    if (novelty[index] <= threshold || novelty[index] < novelty[index - 1] || novelty[index] <= novelty[index + 1]) continue;
+    if (!peaks.length || index - peaks[peaks.length - 1] >= minimumGap) peaks.push(index);
+  }
+  return peaks;
+}
+
+function downsample(samples: Float32Array, sampleRate: number, targetRate: number) {
+  const factor = Math.max(1, Math.round(sampleRate / targetRate));
+  if (factor === 1) return samples;
+  const output = new Float32Array(Math.floor(samples.length / factor));
+  for (let index = 0; index < output.length; index += 1) {
+    let sum = 0;
+    for (let offset = 0; offset < factor; offset += 1) sum += samples[index * factor + offset] ?? 0;
+    output[index] = sum / factor;
+  }
+  return output;
+}
+
+function splitFrequencyBands(samples: Float32Array, sampleRate: number) {
+  const low = new Float32Array(samples.length);
+  const mid = new Float32Array(samples.length);
+  const high = new Float32Array(samples.length);
+  const lowPole = Math.exp(-2 * Math.PI * 180 / sampleRate);
+  const midPole = Math.exp(-2 * Math.PI * 2_000 / sampleRate);
+  let lowState = 0;
+  let midState = 0;
+  for (let index = 0; index < samples.length; index += 1) {
+    const value = samples[index];
+    lowState = lowPole * lowState + (1 - lowPole) * value;
+    midState = midPole * midState + (1 - midPole) * value;
+    low[index] = lowState;
+    mid[index] = midState - lowState;
+    high[index] = value - midState;
+  }
+  return [low, mid, high];
+}
+
+function frameEnergy(samples: Float32Array, frameSize: number, hopSize: number) {
+  const energies: number[] = [];
+  for (let offset = 0; offset + frameSize <= samples.length; offset += hopSize) {
+    let energy = 0;
+    for (let index = 0; index < frameSize; index += 1) energy += samples[offset + index] ** 2;
+    energies.push(energy / frameSize);
+  }
+  return energies;
+}
+
+function periodicityScore(novelty: number[], lag: number) {
+  if (lag < 1 || lag >= novelty.length - 1) return 0;
+  const lower = Math.floor(lag);
+  const fraction = lag - lower;
+  let score = 0;
+  let energyA = 0;
+  let energyB = 0;
+  for (let index = lower + 1; index < novelty.length; index += 1) {
+    const delayed = novelty[index - lower] * (1 - fraction) + novelty[index - lower - 1] * fraction;
+    score += novelty[index] * delayed;
+    energyA += novelty[index] ** 2;
+    energyB += delayed ** 2;
+  }
+  return score / Math.sqrt(energyA * energyB || 1);
 }
 
 function estimatePitchAndKey(samples: Float32Array, sampleRate: number) {
