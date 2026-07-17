@@ -1,15 +1,17 @@
 import { readFile, readdir, stat, writeFile } from "node:fs/promises";
-import { resolve } from "node:path";
+import { basename, resolve } from "node:path";
 import JavaScriptObfuscator from "javascript-obfuscator";
 
 const distDirectory = resolve("dist");
 const files = await collectJavaScript(distDirectory);
+const audioRuntimeFiles = files.filter(isAudioRuntime);
+const filesToHarden = files.filter((file) => !isAudioRuntime(file));
 
 if (files.length === 0) {
   throw new Error("No JavaScript files were found in dist. Run the production build first.");
 }
 
-for (const file of files) {
+for (const file of filesToHarden) {
   const source = await readFile(file, "utf8");
   const result = JavaScriptObfuscator.obfuscate(source, {
     compact: true,
@@ -42,7 +44,14 @@ for (const file of files) {
   await writeFile(file, result.getObfuscatedCode(), "utf8");
 }
 
-console.log(`Hardened ${files.length} JavaScript files.`);
+console.log(`Hardened ${filesToHarden.length} JavaScript files; kept ${audioRuntimeFiles.length} audio runtime files optimized.`);
+
+function isAudioRuntime(file) {
+  const name = basename(file);
+  return name.startsWith("analysis.worker-")
+    || name === "pcm-capture-worklet.js"
+    || name === "offscreen.js";
+}
 
 async function collectJavaScript(directory) {
   const entries = await readdir(directory);
