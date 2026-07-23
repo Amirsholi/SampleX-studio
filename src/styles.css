@@ -40,7 +40,7 @@ button { color: inherit; }
 .side-control { display: grid; place-items: center; }
 .rec-side { align-content:center; }
 .rec-stack { display:grid; justify-items:center; gap:7px; transform:translateY(8px); }
-.rec-action,.delete-action,.restart-action,.play-action,.wav-action { border: 0; background: transparent; cursor: pointer; }
+.rec-action,.delete-action,.analyze-action,.restart-action,.play-action,.wav-action { border: 0; background: transparent; cursor: pointer; }
 .rec-action { display: grid; justify-items: center; gap: 6px; padding: 0; color: #a4b0ba; font-size: 9px; font-weight: 700; letter-spacing: .14em; }
 .control-face { width: 52px; height: 52px; display: grid; place-items: center; color: #c2cbd2; background: #171e25; border: 1px solid #303c46; border-radius: 50%; box-shadow: inset 0 1px 1px rgba(213,231,241,.2), inset 0 -5px 8px rgba(0,0,0,.6), 0 3px 8px rgba(0,0,0,.32); transition: color .2s ease,border-color .2s ease,box-shadow .2s ease; }
 .rec-action.active { color: var(--accent-record); }
@@ -62,7 +62,7 @@ button { color: inherit; }
 .trim-bracket { position:absolute; z-index:6; top:7px; bottom:7px; width:18px; pointer-events:none; border-top:2px solid rgba(248,252,255,.96); border-bottom:2px solid rgba(248,252,255,.96); filter:drop-shadow(0 0 4px rgba(210,238,250,.25)); }
 .trim-bracket-left { transform:translateX(0); border-left:2px solid rgba(248,252,255,.96); }
 .trim-bracket-right { transform:translateX(-18px); border-right:2px solid rgba(248,252,255,.96); }
-.hover-playhead { position:absolute; z-index:7; top:8px; bottom:8px; width:1px; pointer-events:none; background:#6dd7eb; box-shadow:0 0 7px rgba(88,207,232,.48); }
+.hover-playhead { position:absolute; z-index:7; top:8px; bottom:8px; left:0; width:1px; opacity:0; pointer-events:none; background:#6dd7eb; box-shadow:0 0 7px rgba(88,207,232,.48); will-change:left; }
 .analysis-line { display: grid; grid-template-columns: repeat(4,1fr); align-items: center; padding: 0 3px; }
 .datum { min-width: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 1px; white-space: nowrap; }
 .datum strong { font: 600 13px Bahnschrift,"Cascadia Mono",monospace; line-height: 1; overflow: hidden; text-overflow: ellipsis; }
@@ -83,6 +83,9 @@ button { color: inherit; }
 .play-action:not(:disabled):hover { color: #f1fbff; border-color: rgba(104,207,234,.25); box-shadow: 0 0 8px rgba(63,180,215,.12); }
 .delete-action { display:inline-flex; align-items:center; justify-content:center; gap:6px; height:23px; padding:0 10px; color:#84939d; background:#171e25; border:1px solid rgba(128,151,164,.16); border-radius:12px; box-shadow:inset 0 1px 0 rgba(225,238,244,.055); font-size:8px; font-weight:700; letter-spacing:.12em; transition:.18s ease; }
 .delete-action:not(:disabled):hover { color:#ff838a; background:#24171a; border-color:rgba(255,103,112,.46); box-shadow:inset 0 1px 0 rgba(255,223,225,.06),0 0 8px rgba(255,72,83,.12); }
+.analyze-action { display:inline-flex; align-items:center; justify-content:center; gap:5px; height:23px; padding:0 9px; color:#8da6b2; border:1px solid rgba(111,168,245,.2); border-radius:12px; background:#151e26; font-size:7px; font-weight:700; letter-spacing:.1em; white-space:nowrap; }
+.analyze-action:not(:disabled):hover { color:#b9a1f7; border-color:rgba(185,161,247,.42); box-shadow:0 0 8px rgba(185,161,247,.1); }
+.analyze-action.analyzing svg { animation:export-spin .8s linear infinite; }
 .restart-action { position:absolute; z-index:8; left:230px; bottom:12px; display:grid; place-items:center; width:48px; height:32px; color:#8798a2; background:#171e25; border:1px solid rgba(128,151,164,.16); border-radius:16px; box-shadow:inset 0 1px 0 rgba(225,238,244,.055); transition:.18s ease; }
 .restart-action:not(:disabled):hover { color:#c7edf5; border-color:rgba(104,207,234,.25); }
 button:disabled { opacity: .2; cursor: default; }
@@ -116,6 +119,8 @@ footer { display:flex; align-items:flex-start; justify-content:flex-end; padding
   .file-row { gap:5px; }
   .delete-action { width:27px; padding:0; }
   .delete-action span { display:none; }
+  .analyze-action { width:31px; padding:0; }
+  .analyze-action span { display:none; }
   .restart-action,.play-action,.wav-action { width:44px; }
   .restart-action { left:calc(56px + (100% - 61px) * .2 - 22px); }
   .play-action { left:calc(56px + (100% - 61px) * .5 - 22px); }

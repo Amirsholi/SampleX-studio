@@ -35,7 +35,7 @@ Add-Type -AssemblyName System.IO.Compression.FileSystem
 $archiveStream = [IO.File]::Open($archive, [IO.FileMode]::CreateNew)
 $zip = [IO.Compression.ZipArchive]::new($archiveStream, [IO.Compression.ZipArchiveMode]::Create, $false)
 try {
-  $readmeEntry = $zip.CreateEntry("README.txt", [IO.Compression.CompressionLevel]::Optimal)
+  $readmeEntry = $zip.CreateEntry("LEEME.txt", [IO.Compression.CompressionLevel]::Optimal)
   $readmeSourceStream = [IO.File]::OpenRead($readme)
   $readmeEntryStream = $readmeEntry.Open()
   try {

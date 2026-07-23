@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import WaveSurfer from "wavesurfer.js";
 import RegionsPlugin, { type Region } from "wavesurfer.js/dist/plugins/regions.esm.js";
-import { Circle, Download, KeyRound, LoaderCircle, Pause, Pencil, Play, RotateCcw, SkipBack, Square, Trash2, X } from "lucide-react";
+import { Activity, Circle, Download, KeyRound, LoaderCircle, Pause, Pencil, Play, RotateCcw, SkipBack, Square, Trash2, X } from "lucide-react";
 import { decodeAudioBlob } from "./audio/decodeAudio";
 import { deleteLatestRecording, getLatestRecording } from "./audio/recordingStore";
 import type { ExtensionMessage, ExtensionState } from "./extension/messages";
@@ -22,11 +22,11 @@ export default function App() {
   const waveformElement = useRef<HTMLDivElement | null>(null);
   const waveSection = useRef<HTMLElement | null>(null);
   const liveCanvas = useRef<HTMLCanvasElement | null>(null);
+  const hoverPlayhead = useRef<HTMLSpanElement | null>(null);
   const waveform = useRef<WaveSurfer | null>(null);
   const region = useRef<Region | null>(null);
   const buffer = useRef<AudioBuffer | null>(null);
   const worker = useRef<Worker | null>(null);
-  const analysisTimer = useRef<number | null>(null);
   const analysisRequestId = useRef(0);
   const latestAnalysisRequestId = useRef(0);
   const exportRequestId = useRef(0);
@@ -43,7 +43,6 @@ export default function App() {
   const [analyzing, setAnalyzing] = useState(false);
   const [elapsed, setElapsed] = useState(0);
   const [playing, setPlaying] = useState(false);
-  const [hoverPlayhead, setHoverPlayhead] = useState<number | null>(null);
   const [uiError, setUiError] = useState<string | null>(null);
   const [access, setAccess] = useState<AccessState>({ credits: FREE_EXPORTS, unlocked: false });
   const [licenseOpen, setLicenseOpen] = useState(false);
@@ -84,7 +83,7 @@ export default function App() {
         if (next) {
           setExtensionState(next);
           setUiError(next.status === "error" ? next.error ?? "SampleX encountered an error." : null);
-          if (next.status === "ready") void loadRecording();
+          if (next.status === "ready") void loadRecording(true);
         }
         if (changes.samplexExportCredits || changes.samplexLicense || changes.samplexRedeemedLicenses) void refreshAccess();
       };
@@ -118,7 +117,7 @@ export default function App() {
       const next = await chrome.runtime.sendMessage({ type: "GET_STATE" } satisfies ExtensionMessage) as ExtensionState;
       setExtensionState(next);
       setUiError(next.status === "error" ? next.error ?? "SampleX encountered an error." : null);
-      if (next.status === "ready") await loadRecording();
+      if (next.status === "ready") await loadRecording(false);
     } catch (error) {
       setUiError(errorMessage(error));
     }
@@ -128,7 +127,7 @@ export default function App() {
     setAccess(await getAccessState());
   }
 
-  async function loadRecording() {
+  async function loadRecording(analyzeShortRecording: boolean) {
     const stored = await getLatestRecording();
     if (!stored) return;
     waveform.current?.destroy();
@@ -145,15 +144,17 @@ export default function App() {
     currentSampleName.current = loadedName;
     setSampleName(loadedName);
     setElapsed(decoded.duration);
-    mountWaveform(url, restored?.range);
+    mountWaveform(url, decoded, restored?.range, analyzeShortRecording && decoded.duration < 15);
   }
 
-  function mountWaveform(url: string, restoredRange?: SelectionRange) {
+  function mountWaveform(url: string, decoded: AudioBuffer, restoredRange?: SelectionRange, analyzeOnReady = false) {
     if (!waveformElement.current) return;
     const regions = RegionsPlugin.create();
     const instance = WaveSurfer.create({
       container: waveformElement.current,
       url,
+      peaks: Array.from({ length: decoded.numberOfChannels }, (_, index) => decoded.getChannelData(index)),
+      duration: decoded.duration,
       height: 111,
       waveColor: ["#53616b", "#aab8bf", "#667681"],
       progressColor: ["#91bac5", "#e7f2f4", "#70bfd0"],
@@ -190,13 +191,16 @@ export default function App() {
       activeRange.current = initial;
       setRange(initial);
       instance.setTime(initial.start);
-      scheduleAnalysis(initial);
+      if (analyzeOnReady) analyzeCurrentSelection();
     });
     regions.on("region-update", (selection) => {
       if (selection.id !== "trim-selection") return;
       const next = { start: selection.start, end: selection.end };
       activeRange.current = next;
       setRange(next);
+      latestAnalysisRequestId.current = ++analysisRequestId.current;
+      setAnalysis(null);
+      setAnalyzing(false);
     });
     regions.on("region-updated", (selection) => {
       if (selection.id !== "trim-selection") return;
@@ -206,7 +210,6 @@ export default function App() {
       instance.setTime(next.start);
       if (instance.isPlaying()) void instance.play(next.start);
       void persistEditingSession(next, currentSampleName.current);
-      scheduleAnalysis(next);
     });
   }
 
@@ -215,7 +218,6 @@ export default function App() {
     setUiError(null);
     try {
       if (recording) {
-        setAnalyzing(true);
         const response = await chrome.runtime.sendMessage({ type: "STOP_RECORDING" } satisfies ExtensionMessage) as { ok?: boolean; error?: string };
         if (response?.ok === false) throw new Error(response.error ?? "Recording could not stop.");
         return;
@@ -243,6 +245,7 @@ export default function App() {
     if (objectUrl.current) URL.revokeObjectURL(objectUrl.current);
     objectUrl.current = null;
     setRange(EMPTY_RANGE);
+    latestAnalysisRequestId.current = ++analysisRequestId.current;
     setAnalysis(null);
     setAnalyzing(false);
     setElapsed(0);
@@ -257,15 +260,12 @@ export default function App() {
     }
   }
 
-  function scheduleAnalysis(next: SelectionRange) {
-    if (analysisTimer.current) window.clearTimeout(analysisTimer.current);
+  function analyzeCurrentSelection() {
+    if (!buffer.current || !worker.current || analyzing || activeRange.current.end <= activeRange.current.start) return;
     const requestId = ++analysisRequestId.current;
     latestAnalysisRequestId.current = requestId;
     setAnalyzing(true);
-    analysisTimer.current = window.setTimeout(() => {
-      if (!buffer.current || !worker.current) return;
-      worker.current.postMessage({ type: "ANALYZE", requestId, range: next } satisfies AnalysisWorkerRequest);
-    }, 350);
+    worker.current.postMessage({ type: "ANALYZE", requestId, range: activeRange.current } satisfies AnalysisWorkerRequest);
   }
 
   function loadAudioIntoAnalysisWorker(audio: AudioBuffer) {
@@ -398,14 +398,20 @@ export default function App() {
 
   function previewPlayhead(event: React.PointerEvent<HTMLElement>) {
     if (!hasAudio || isTrimControl(event.target)) return;
-    setHoverPlayhead(wavePosition(event.clientX) * 100);
+    if (!hoverPlayhead.current) return;
+    hoverPlayhead.current.style.left = `${wavePosition(event.clientX) * 100}%`;
+    hoverPlayhead.current.style.opacity = "1";
+  }
+
+  function hidePreviewPlayhead() {
+    if (hoverPlayhead.current) hoverPlayhead.current.style.opacity = "0";
   }
 
   function commitPlayhead(event: React.MouseEvent<HTMLElement>) {
     if (!hasAudio || !waveform.current || isTrimControl(event.target)) return;
     const nextTime = wavePosition(event.clientX) * waveform.current.getDuration();
     waveform.current.setTime(nextTime);
-    setHoverPlayhead(null);
+    hidePreviewPlayhead();
   }
 
   function drawLiveWaveform(samples: number[]) {
@@ -416,9 +422,13 @@ export default function App() {
     const scale = window.devicePixelRatio || 1;
     const width = canvas.clientWidth;
     const height = canvas.clientHeight;
-    canvas.width = width * scale;
-    canvas.height = height * scale;
-    context.scale(scale, scale);
+    const pixelWidth = Math.round(width * scale);
+    const pixelHeight = Math.round(height * scale);
+    if (canvas.width !== pixelWidth || canvas.height !== pixelHeight) {
+      canvas.width = pixelWidth;
+      canvas.height = pixelHeight;
+      context.setTransform(scale, 0, 0, scale, 0, 0);
+    }
     context.clearRect(0, 0, width, height);
     const rms = Math.sqrt(samples.reduce((sum, sample) => {
       const normalized = (sample - 128) / 128;
@@ -428,7 +438,10 @@ export default function App() {
     const amplitude = Math.min(1, previous * 0.38 + rms * 2.8 * 0.62);
     const barStep = 5;
     const maximumBars = Math.max(1, Math.floor(width / barStep));
-    liveBars.current = [...liveBars.current, amplitude].slice(-maximumBars);
+    liveBars.current.push(amplitude);
+    if (liveBars.current.length > maximumBars) {
+      liveBars.current.splice(0, liveBars.current.length - maximumBars);
+    }
     const center = height / 2;
     context.fillStyle = "#7bd6ed";
     context.shadowColor = "rgba(83, 202, 232, .22)";
@@ -443,11 +456,9 @@ export default function App() {
   function cleanup() {
     worker.current?.terminate();
     waveform.current?.destroy();
-    if (analysisTimer.current) window.clearTimeout(analysisTimer.current);
     if (objectUrl.current) URL.revokeObjectURL(objectUrl.current);
   }
 
-  const loading = analyzing || extensionState.status === "stopping";
   const duration = hasAudio ? range.end - range.start : recording ? elapsed : 0;
   const sourceDuration = buffer.current?.duration ?? 0;
   const trimStart = sourceDuration ? (range.start / sourceDuration) * 100 : 0;
@@ -483,10 +494,13 @@ export default function App() {
               <input aria-label="Sample name" value={sampleName} onChange={(event) => renameSample(event.target.value)} disabled={!hasAudio} />
             </label>
             <button className="delete-action" onClick={() => void clearSample()} disabled={!hasAudio || recording}><Trash2 size={13} /><span>DELETE</span></button>
+            <button className={`analyze-action ${analyzing ? "analyzing" : ""}`} onClick={analyzeCurrentSelection} disabled={!hasAudio || analyzing || recording} title="Analyze the trimmed selection">
+              {analyzing ? <LoaderCircle size={12} /> : <Activity size={12} />}<span>{analyzing ? "ANALYZING" : "ANALYZE"}</span>
+            </button>
           </div>
 
           <div className="display-frame">
-            <section ref={waveSection} className="wave-section" title={hasAudio ? "Drag the brackets to trim. Hover to preview a position and click to place the playhead." : undefined} onPointerMove={previewPlayhead} onPointerLeave={() => setHoverPlayhead(null)} onClick={commitPlayhead}>
+            <section ref={waveSection} className="wave-section" title={hasAudio ? "Drag the brackets to trim. Hover to preview a position and click to place the playhead." : undefined} onPointerMove={previewPlayhead} onPointerLeave={hidePreviewPlayhead} onClick={commitPlayhead}>
               {!hasAudio && <div className="flat-wave" />}
               {showingCapture && <canvas ref={liveCanvas} className="live-wave" />}
               <div ref={waveformElement} className={hasAudio ? "wave-ready" : "wave-ready hidden"} />
@@ -495,16 +509,16 @@ export default function App() {
                 <span className="trim-mask trim-mask-right" style={{ left: `${trimEnd}%` }} />
                 <span className="trim-bracket trim-bracket-left" style={{ left: `${trimStart}%` }} />
                 <span className="trim-bracket trim-bracket-right" style={{ left: `${trimEnd}%` }} />
-                {hoverPlayhead !== null && <span className="hover-playhead" style={{ left: `${hoverPlayhead}%` }} />}
+                <span ref={hoverPlayhead} className="hover-playhead" />
               </>}
             </section>
           </div>
 
           <section className="analysis-line">
-            <Datum loading={loading} value={analysis?.bpm ? String(Math.round(analysis.bpm)) : "…"} label="BPM" />
-            <Datum loading={loading} value={analysis?.key ?? analysis?.note ?? "…"} label="KEY" hideLabel />
-            <Datum loading={loading} value={analysis?.frequencyHz ? String(Math.round(analysis.frequencyHz)) : "…"} label="HZ" />
-            <Datum loading={loading} value={formatTime(duration)} label="LENGTH" />
+            <Datum loading={analyzing} value={analysis?.bpm ? String(Math.round(analysis.bpm)) : "…"} label="BPM" />
+            <Datum loading={analyzing} value={analysis?.key ?? analysis?.note ?? "…"} label="KEY" hideLabel />
+            <Datum loading={analyzing} value={analysis?.frequencyHz ? String(Math.round(analysis.frequencyHz)) : "…"} label="HZ" />
+            <Datum loading={false} value={formatTime(duration)} label="LENGTH" />
           </section>
 
           <button className="play-action" onClick={togglePlayback} disabled={!hasAudio} aria-label={playing ? "Pause" : "Play"} title={playing ? "Pause" : "Play"}>

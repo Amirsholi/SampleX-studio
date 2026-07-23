@@ -5,14 +5,22 @@ export {};
   const existing = document.getElementById(hostId);
 
   if (existing) {
-    existing.style.opacity = "0";
-    existing.style.transform = "translate(14px,-12px) scale(.96)";
-    window.setTimeout(() => existing.remove(), 180);
+    const isHidden = existing.dataset.samplexHidden === "true";
+    existing.dataset.samplexHidden = isHidden ? "false" : "true";
+    existing.style.visibility = "visible";
+    existing.style.opacity = isHidden ? "1" : "0";
+    existing.style.transform = isHidden ? "translate(0,0) scale(1)" : "translate(14px,-12px) scale(.96)";
+    const frame = existing.querySelector("iframe");
+    if (frame) frame.style.pointerEvents = isHidden ? "auto" : "none";
+    if (!isHidden) window.setTimeout(() => {
+      if (existing.dataset.samplexHidden === "true") existing.style.visibility = "hidden";
+    }, 210);
     return;
   }
 
   const host = document.createElement("div");
   host.id = hostId;
+  host.dataset.samplexHidden = "false";
   host.style.cssText = "position:fixed;top:12px;right:12px;z-index:2147483647;width:min(600px,calc(100vw - 24px));height:286px;pointer-events:none;opacity:0;transform:translate(14px,-12px) scale(.96);transform-origin:top right;transition:opacity 180ms ease,transform 210ms cubic-bezier(.2,.8,.2,1);";
 
   const frame = document.createElement("iframe");

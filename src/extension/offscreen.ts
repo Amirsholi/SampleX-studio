@@ -1,5 +1,4 @@
 import { saveLatestRecording } from "../audio/recordingStore";
-import { encodeFloat32Wav } from "../audio/encodeFloatWav";
 import type { ExtensionMessage } from "./messages";
 
 let recorder: MediaRecorder | null = null;
@@ -86,8 +85,8 @@ async function finishRecording() {
   let blob: Blob;
   if (captureMode === "pcm") {
     await flushPcmCapture();
-    const channels = mergePcmChunks(pcmChunks);
-    const wav = encodeFloat32Wav(channels, audioContext?.sampleRate ?? 48_000);
+    const wav = await finalizePcmRecording(pcmChunks, audioContext?.sampleRate ?? 48_000);
+    pcmChunks = [];
     blob = new Blob([wav], { type: "audio/wav" });
   } else {
     const activeRecorder = recorder!;
@@ -145,15 +144,21 @@ function flushPcmCapture() {
   });
 }
 
-function mergePcmChunks(chunksByChannel: Float32Array[][]) {
-  return chunksByChannel.map((channelChunks) => {
-    const length = channelChunks.reduce((sum, chunk) => sum + chunk.length, 0);
-    const channel = new Float32Array(length);
-    let offset = 0;
-    for (const chunk of channelChunks) {
-      channel.set(chunk, offset);
-      offset += chunk.length;
-    }
-    return channel;
+function finalizePcmRecording(chunksByChannel: Float32Array[][], sampleRate: number) {
+  return new Promise<ArrayBuffer>((resolve, reject) => {
+    const worker = new Worker(new URL("../audio/pcmFinalize.worker.ts", import.meta.url), { type: "module" });
+    worker.onmessage = (event: MessageEvent<{ ok: boolean; wav?: ArrayBuffer; error?: string }>) => {
+      worker.terminate();
+      if (event.data.ok && event.data.wav) resolve(event.data.wav);
+      else reject(new Error(event.data.error ?? "The recording could not be finalized."));
+    };
+    worker.onerror = (event) => {
+      worker.terminate();
+      reject(new Error(event.message || "The recording could not be finalized."));
+    };
+    worker.postMessage(
+      { chunksByChannel, sampleRate },
+      chunksByChannel.flatMap((channel) => channel.map((chunk) => chunk.buffer)),
+    );
   });
 }
