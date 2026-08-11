@@ -1,16 +1,22 @@
-SAMPLEX - DEMO TRIAL
+SAMPLEX - INSTALACIÓN EN GOOGLE CHROME
 
-INSTALACION EN GOOGLE CHROME
+IMPORTANTE
 
-1. Descomprime el archivo ZIP completo.
-2. Abre chrome://extensions en Google Chrome.
-3. Activa el modo desarrollador.
-4. Pulsa "Cargar extension descomprimida".
-5. Selecciona la carpeta "SampleX" incluida en el ZIP.
-6. Fija SampleX en la barra de herramientas.
-7. Abre una pagina con audio, pulsa SampleX y luego pulsa REC.
+Chrome no instala el archivo ZIP directamente. Primero debes descomprimirlo.
 
-No selecciones el archivo ZIP directamente. Primero debes descomprimirlo.
+PASOS
+
+1. Haz clic derecho sobre el ZIP descargado.
+2. Selecciona "Extraer todo" y luego pulsa "Extraer".
+3. Abre Google Chrome.
+4. Escribe chrome://extensions en la barra de direcciones y pulsa Enter.
+5. Activa "Modo de desarrollador" en la esquina superior derecha.
+6. Pulsa "Cargar extensión descomprimida".
+7. Selecciona la carpeta que acabas de extraer. Es la carpeta que contiene los archivos "manifest.json" y "LEEME.txt".
+8. Pulsa "Seleccionar carpeta".
+9. Fija SampleX en la barra de herramientas de Chrome.
+
+No selecciones el ZIP ni el archivo LEEME.txt. Debes seleccionar la carpeta completa que contiene ambos archivos.
 
 La Demo Trial incluye 75 exportaciones WAV.
-La grabacion, el recorte y el analisis se procesan localmente en el navegador.
+La grabación, el recorte y el análisis se procesan localmente en el navegador.

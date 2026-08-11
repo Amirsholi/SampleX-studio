@@ -47,7 +47,7 @@ try {
 
   Get-ChildItem -LiteralPath $stagingDirectory -File -Recurse | ForEach-Object {
     $relativePath = $_.FullName.Substring($resolvedStaging.Length).TrimStart([char[]]@('\', '/')).Replace('\', '/')
-    $entry = $zip.CreateEntry("SampleX/$relativePath", [IO.Compression.CompressionLevel]::Optimal)
+    $entry = $zip.CreateEntry($relativePath, [IO.Compression.CompressionLevel]::Optimal)
     $sourceStream = [IO.File]::OpenRead($_.FullName)
     $entryStream = $entry.Open()
     try {
